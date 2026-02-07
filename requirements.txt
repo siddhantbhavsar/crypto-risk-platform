@@ -2,4 +2,7 @@ pandas
 services
 networkx
 pydantic
+fastapi
+uvicorn
+
 #.venv\Scripts\python -m pip install -r requirements.txt
