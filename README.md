@@ -1,3 +1,7 @@
+🚧 Work in Progress — Building a modular crypto AML risk platform
+
+
+
 # Crypto Risk Platform (AML + AI) — WIP
 
 A modular, extensible sandbox for building **crypto transaction monitoring** infrastructure:
@@ -6,7 +10,7 @@ A modular, extensible sandbox for building **crypto transaction monitoring** inf
 ## Why
 This repo is a career-grade project to practice building scalable risk systems (batch today, streaming/real-time next).
 
-## Architecture (today)
+## Architecture 
 [Transaction Simulator] -> [CSV] -> [Graph Builder] -> [Risk Engine] -> [Top Risk Wallets]
 
 ## Services
