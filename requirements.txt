@@ -4,5 +4,7 @@ networkx
 pydantic
 fastapi
 uvicorn
-
+sqlalchemy
+psycopg2-binary
+alembic
 #.venv\Scripts\python -m pip install -r requirements.txt
