@@ -269,17 +269,6 @@ The explainability endpoint breaks risk into hop layers and shows which neighbor
 
 The ingestion status endpoint exposes throughput, processing metrics, graph readiness, and the latest scoring run — similar to real production observability dashboards.
 
-## 🎯 Why this project exists
-
-AML and fraud platforms must:
-
-1. ingest high-volume transaction streams
-2. store data reliably
-3. compute graph-based risk signals
-4. provide explainability for analysts
-5. expose operational health metrics
-
-This project is a portfolio-ready simulation of those systems.
 
 ---
 
