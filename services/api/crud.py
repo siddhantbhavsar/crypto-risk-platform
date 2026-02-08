@@ -4,9 +4,12 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import desc
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from services.api.models import RiskScore, ScoringRun
+
+from .models import Transaction
 
 
 def create_scoring_run(
@@ -48,6 +51,23 @@ def bulk_insert_risk_scores(
     db.add_all(objs)
     return len(objs)
 
+def upsert_transactions(db, tx_rows):
+    """
+    tx_rows: list[dict] each with keys:
+      tx_id, sender, receiver, amount, timestamp (optional)
+    """
+    if not tx_rows:
+        return 0
+
+    stmt = insert(Transaction).values(tx_rows)
+
+    # If tx_id already exists, do nothing (dedupe)
+    stmt = stmt.on_conflict_do_nothing(index_elements=["tx_id"])
+
+    result = db.execute(stmt)
+    db.commit()
+    # result.rowcount may be None depending on driver; safe fallback:
+    return result.rowcount or 0
 
 def get_top_scores_latest(db: Session, n: int = 20) -> List[RiskScore]:
     latest = get_latest_run(db)
@@ -78,3 +98,6 @@ def get_latest_run(db: Session) -> Optional[ScoringRun]:
         .order_by(desc(ScoringRun.created_at))
         .first()
     )
+
+def fetch_all_transactions(db):
+    return db.query(Transaction).all()

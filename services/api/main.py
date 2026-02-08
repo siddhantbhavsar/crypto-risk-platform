@@ -1,15 +1,20 @@
+import os
+
 import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
 
-from services.api import crud
-from services.api.db import get_db
 from services.scoring.risk_engine import (
     RiskConfig,
     build_tx_graph,
     pick_seed_illicit_wallets,
     risk_score_wallet,
 )
+
+from . import crud
+from .db import SessionLocal, get_db
+
+TX_SOURCE = os.getenv("TX_SOURCE", "csv").lower()
 
 app = FastAPI(title="Crypto Risk Platform API", version="0.2.0")
 
@@ -19,23 +24,73 @@ cfg = RiskConfig(hop_weights=(1.0, 0.6, 0.3), degree_normalize=True)
 
 GRAPH = None
 ILLICIT = None
+ILLICIT_SEED = int(os.getenv("ILLICIT_SEED", "42"))
+
+
+def load_transactions_from_db(db):
+    rows = crud.fetch_all_transactions(db)
+    return [
+        {"src": r.sender, "dst": r.receiver, "amount": float(r.amount or 0.0)}
+        for r in rows
+    ]
+
+
 
 
 @app.on_event("startup")
 def startup():
     global GRAPH, ILLICIT
-    try:
-        txs = pd.read_csv(TX_PATH)
-    except FileNotFoundError:
-        raise RuntimeError(f"Missing {TX_PATH}. Run: python services/ingestion/simulator.py")
+
+    if TX_SOURCE == "db":
+        # Load transactions from Postgres
+        db = SessionLocal()
+        try:
+            tx_list = load_transactions_from_db(db)
+        finally:
+            db.close()
+
+        if not tx_list:
+            raise RuntimeError(
+                "TX_SOURCE=db but no transactions found in DB. Run producer/consumer first."
+                )
+
+        txs = pd.DataFrame(tx_list)
+
+    else:
+        # Load transactions from CSV (existing behavior)
+        try:
+            txs = pd.read_csv(TX_PATH)
+        except FileNotFoundError:
+            raise RuntimeError(f"Missing {TX_PATH}. Run: python services/ingestion/simulator.py")
 
     GRAPH = build_tx_graph(txs)
-    ILLICIT = pick_seed_illicit_wallets(GRAPH.nodes, pct=0.05)
+    ILLICIT = pick_seed_illicit_wallets(GRAPH.nodes, pct=0.05, seed=ILLICIT_SEED)
+
 
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+
+@app.post("/reload-graph")
+def reload_graph(db: Session = Depends(get_db)):
+    global GRAPH, ILLICIT
+
+    if TX_SOURCE != "db":
+        return {"ok": False, "error": "Set TX_SOURCE=db to use this endpoint."}
+
+    tx_list = load_transactions_from_db(db)
+    if not tx_list:
+        return {"ok": False, "error": "No transactions found in DB."}
+
+    txs = pd.DataFrame(tx_list)
+    GRAPH = build_tx_graph(txs)
+    ILLICIT = pick_seed_illicit_wallets(GRAPH.nodes, pct=0.05, seed=ILLICIT_SEED)
+
+
+    return {"ok": True, "tx_count": len(tx_list)}
 
 
 # --- OLD: in-memory scoring (still useful) ---
@@ -59,7 +114,7 @@ def run_score(db: Session = Depends(get_db)):
     # store run metadata
     run = crud.create_scoring_run(
         db,
-        tx_source=f"csv:{TX_PATH}",
+        tx_source = f"{TX_SOURCE}:{TX_PATH}" if TX_SOURCE == "csv" else "db:transactions",
         config_json={
             "hop_weights": list(cfg.hop_weights),
             "degree_normalize": cfg.degree_normalize,

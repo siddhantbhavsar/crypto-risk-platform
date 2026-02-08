@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
@@ -39,3 +41,14 @@ class RiskScore(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     run = relationship("ScoringRun", back_populates="scores")
+
+
+class Transaction(Base):
+    __tablename__ = "transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tx_id = Column(String, unique=True, index=True)
+    sender = Column(String, index=True)
+    receiver = Column(String, index=True)
+    amount = Column(Float)
+    timestamp = Column(DateTime, default=datetime.utcnow)
