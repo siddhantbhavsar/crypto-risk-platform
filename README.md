@@ -24,21 +24,40 @@ All services are containerized and reproducible using Docker.
 
 ---
 
-## 🧱 Architecture
+## 🧱 Architecture Diagram
 
-```
-Simulator
-→ Kafka Producer
-→ Kafka Topic (transactions)
-→ Kafka Consumer
-→ Postgres
+```mermaid
+flowchart LR
 
-Postgres
-→ FastAPI API
-→ Graph reload
-→ Risk scoring engine
-→ scoring_runs + risk_scores
+subgraph Ingestion
+  SIM[Simulator]
+  PROD[Kafka Producer]
+  K[(Kafka Topic)]
+  CONS[Kafka Consumer]
+end
+
+subgraph Storage
+  DB[(Postgres)]
+end
+
+subgraph API_and_Scoring
+  API[FastAPI API]
+  GRAPH[Graph Reload]
+  SCORE[Risk Scoring Engine]
+  RUNS[(scoring_runs)]
+  SCORES[(risk_scores)]
+end
+
+SIM --> PROD --> K --> CONS --> DB
+DB --> API
+API --> GRAPH --> SCORE
+SCORE --> RUNS
+SCORE --> SCORES
+
+API --> STATUS[/ingestion/status/]
+API --> EXPLAIN[/scores/explain/]
 ```
+
 
 All services run via Docker Compose.
 
