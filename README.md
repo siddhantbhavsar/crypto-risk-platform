@@ -1,14 +1,14 @@
 # Crypto AML Risk Platform
 
-A fintech-style backend platform that simulates a production crypto transaction monitoring system.
+A fintech-style backend platform that simulates a production crypto AML transaction monitoring system.
 
-This project demonstrates real-world data engineering and backend architecture patterns used in AML and fraud detection systems.
+This project demonstrates how a real-world risk pipeline is built: streaming ingestion, persistent storage, graph analytics, scoring orchestration, and operational observability — all containerized and reproducible.
 
 ---
 
-## Overview
+## 🚀 Overview
 
-This platform simulates an end-to-end crypto risk pipeline:
+The platform simulates an end-to-end crypto risk pipeline:
 
 ```
 Transaction Simulator
@@ -19,62 +19,11 @@ Transaction Simulator
 → Dockerized Deployment
 ```
 
-The goal is to showcase production-style system design including streaming ingestion, idempotent persistence, scoring pipelines, and operational observability.
+The goal is to showcase production-grade backend engineering patterns used in AML and fraud detection systems.
 
 ---
 
-## Features
-
-### Streaming Ingestion
-
-* Kafka producer publishes simulated crypto transactions
-* Consumer ingests into Postgres in batched writes
-* Idempotent inserts using:
-
-```
-ON CONFLICT DO NOTHING + RETURNING
-```
-
-This guarantees accurate ingestion metrics even under retries.
-
-### Persistent Storage
-
-Postgres stores:
-
-* transactions
-* ingestion_state metrics
-* scoring_runs
-* risk_scores
-
-### Graph-Based Risk Engine
-
-* Builds transaction graph from database
-* Computes wallet risk scores
-* Persists scoring runs for analytics
-
-### FastAPI Analytics Layer
-
-Endpoints:
-
-* `POST /reload-graph`
-* `POST /run-score`
-* `GET /scores/top`
-* `GET /ingestion/status` *(planned next)*
-
-### Containerized Deployment
-
-All services run in Docker Compose:
-
-* API
-* Kafka + Zookeeper
-* Postgres
-* Consumer
-
-Hot reload enabled for rapid development.
-
----
-
-## Architecture
+## 🧱 Architecture
 
 ```
 Simulator → Kafka → Consumer → Postgres
@@ -84,33 +33,103 @@ Simulator → Kafka → Consumer → Postgres
               Risk Scoring Engine
 ```
 
-The system is designed to mimic real AML transaction monitoring pipelines used in fintech environments.
+All services run via Docker Compose.
 
 ---
 
-## Repository Structure
+## ✨ Features
+
+### Streaming Ingestion
+
+* Kafka producer publishes simulated crypto transactions
+* Consumer writes batched inserts into Postgres
+* Idempotent ingestion using:
+
+```
+ON CONFLICT DO NOTHING + RETURNING
+```
+
+This guarantees accurate insert metrics even with retries.
+
+---
+
+### Persistent Storage
+
+Postgres stores:
+
+* `transactions`
+* `ingestion_state` (operational metrics)
+* `scoring_runs`
+* `risk_scores`
+
+---
+
+### Graph-Based Risk Engine
+
+* Builds wallet transaction graph from database
+* Computes multi-hop exposure risk
+* Persists scoring runs for auditability
+
+---
+
+### FastAPI Analytics Layer
+
+Endpoints:
+
+```
+POST /reload-graph
+POST /run-score
+GET  /scores/top?limit=10
+GET  /ingestion/status
+GET  /ready
+GET  /health
+```
+
+---
+
+### Observability
+
+`/ingestion/status` exposes real operational state:
+
+* transaction counts
+* ingestion progress
+* latest scoring run
+* graph health
+* system readiness
+
+Example response:
+
+```json
+{
+  "status": "ok",
+  "tx_count": 4000,
+  "ingestion": {
+    "name": "transactions_consumer",
+    "total_inserted": 4000,
+    "last_error": null
+  },
+  "graph_ready": true
+}
+```
+
+This mirrors production monitoring endpoints used in fintech services.
+
+---
+
+## 📁 Repository Structure
 
 ```
 crypto-risk-platform/
 
 services/
   api/
-    main.py
-    db.py
-    models.py
-    crud.py
-
   ingestion/
-    simulator.py
-    kafka_producer.py
-    kafka_consumer.py
-
   scoring/
-    risk_engine.py
-    run_scoring.py
+
+scripts/
+  demo.py
 
 alembic/
-tests/
 data/
 
 docker-compose.yml
@@ -120,12 +139,15 @@ requirements.txt
 
 ---
 
-## Setup
+## ⚙️ Setup
 
 ### Requirements
 
 * Docker
 * Docker Compose
+* Python 3.11+ (for demo script)
+
+---
 
 ### Start the platform
 
@@ -133,7 +155,7 @@ requirements.txt
 docker compose up -d --build
 ```
 
-### Create database tables (dev mode)
+Create database tables (dev mode):
 
 ```
 docker compose exec api python -c "from services.api.db import engine, Base; import services.api.models; Base.metadata.create_all(bind=engine)"
@@ -141,57 +163,46 @@ docker compose exec api python -c "from services.api.db import engine, Base; imp
 
 ---
 
-## Demo Workflow
+## ▶️ Quick Demo
 
-### Generate transactions
+### 1. Generate simulated transactions
 
 ```
 docker compose exec api python services/ingestion/simulator.py
 ```
 
-### Publish to Kafka
+### 2. Publish to Kafka
 
 ```
 docker compose exec api python services/ingestion/kafka_producer.py
 ```
 
-### Reload graph
+### 3. Run full demo pipeline
 
 ```
-POST /reload-graph
+python scripts/demo.py
 ```
 
-### Run scoring
+This automatically:
 
-```
-POST /run-score
-```
-
-### Fetch top risk wallets
-
-```
-GET /scores/top?limit=10
-```
+* reloads graph
+* runs scoring
+* prints top risky wallets
+* shows ingestion status
 
 ---
 
-## Key Engineering Highlights
+## 🔬 Key Engineering Highlights
 
 ### Idempotent ingestion
 
-Transactions are deduplicated using primary key constraints and Postgres upserts.
+Duplicate transactions are safely ignored via Postgres upserts. Accurate insert counts are computed using `RETURNING` instead of unreliable rowcount behavior.
 
-Accurate insert metrics are computed using:
-
-```
-INSERT ... RETURNING
-```
-
-instead of unreliable rowcount behavior.
+---
 
 ### Schema normalization
 
-The pipeline supports both:
+The ingestion pipeline supports both:
 
 ```
 src/dst
@@ -200,18 +211,15 @@ sender/receiver
 
 and normalizes records to prevent null wallet corruption.
 
-### Observability
+---
 
-The ingestion_state table tracks:
+### Operational observability
 
-* last processed transaction
-* total inserted count
-* error status
-* timestamps
+The platform exposes ingestion and scoring health via structured API endpoints suitable for dashboards and monitoring systems.
 
 ---
 
-## Development Workflow
+## 🧪 Development Workflow
 
 Hot reload is enabled inside Docker:
 
@@ -223,27 +231,30 @@ Consumer restarts only when ingestion code changes.
 
 ---
 
-## Future Improvements
+## 🛣 Future Improvements
 
-* Ingestion status endpoint
-* Kafka lag metrics
-* Alembic migration automation
-* Prometheus monitoring
+* Automatic DB migrations on startup
+* Kafka lag and throughput metrics
+* Scheduled scoring jobs
+* Risk explainability endpoints
+* Monitoring dashboard UI
 * Authentication & rate limiting
-* UI dashboard
 
 ---
 
-## Purpose
+## 🎯 Purpose
 
-This project is built as a portfolio demonstration of:
+This project is a portfolio demonstration of:
 
-* Streaming data engineering
-* Backend system design
-* Risk analytics pipelines
-* Production deployment patterns
+* streaming data engineering
+* backend system design
+* graph analytics pipelines
+* production deployment patterns
 
-It simulates infrastructure used in real-world fintech AML systems.
+It simulates infrastructure used in real fintech AML systems.
 
 ---
 
+## 📜 License
+
+MIT

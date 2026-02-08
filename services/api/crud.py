@@ -12,6 +12,9 @@ from services.api.models import RiskScore, ScoringRun
 from .models import Transaction, IngestionState
 
 
+CONSUMER_NAME = "transactions_consumer"
+
+
 def create_scoring_run(
     db: Session,
     tx_source: str,
@@ -120,3 +123,16 @@ def record_ingestion(db, name: str, last_tx_id: str | None, inserted: int, last_
     )
     db.execute(stmt)
     db.commit()
+
+
+
+def count_transactions(db: Session) -> int:
+    return int(db.query(func.count(Transaction.id)).scalar() or 0)
+
+
+def get_ingestion_state(db: Session, name: str = CONSUMER_NAME) -> IngestionState | None:
+    return db.query(IngestionState).filter(IngestionState.name == name).first()
+
+
+def count_scores_for_run(db: Session, run_id: int) -> int:
+    return int(db.query(func.count(RiskScore.id)).filter(RiskScore.run_id == run_id).scalar() or 0)

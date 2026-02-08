@@ -10,5 +10,6 @@ alembic
 pytest
 ruff
 kafka-python==2.0.2
+requests
 
 #.venv\Scripts\python -m pip install -r requirements.txt

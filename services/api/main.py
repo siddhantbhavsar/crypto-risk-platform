@@ -4,7 +4,7 @@ import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import ProgrammingError
-
+from .models import IngestionState  
 
 
 from services.scoring.risk_engine import (
@@ -232,3 +232,89 @@ def latest_score(wallet: str, db: Session = Depends(get_db)):
         "run_id": s.run_id,
         "created_at": s.created_at,
     }
+
+@app.get("/ingestion/status")
+def ingestion_status(db: Session = Depends(get_db)):
+    """
+    Observability endpoint:
+    - tx_count
+    - ingestion_state for the consumer
+    - latest scoring run summary
+    - graph_ready + optional graph_stats
+    """
+    try:
+        tx_count = crud.count_transactions(db)
+
+        ing = crud.get_ingestion_state(db, name="transactions_consumer")
+
+        latest_run = crud.get_latest_run(db)
+        latest_run_summary = None
+        # --- derive overall system status ---
+        status = "ok"
+
+        # --- derive overall system status ---
+        status = "ok"
+
+        # if graph not loaded yet, you're still starting up
+        if not GRAPH_READY:
+            status = "starting"
+
+        # if ingestion_state isn't created yet (fresh DB), also starting
+        if ing is None:
+            status = "starting"
+
+        # any recorded errors -> degraded
+        if ing and ing.last_error:
+            status = "degraded"
+
+        if GRAPH_ERROR:
+            status = "degraded"
+
+
+        if latest_run:
+            wallets_scored = crud.count_scores_for_run(db, run_id=latest_run.id)
+            latest_run_summary = {
+                "run_id": latest_run.id,
+                "created_at": latest_run.created_at,
+                "tx_source": latest_run.tx_source,
+                "wallets_scored": wallets_scored,
+                "config_json": latest_run.config_json,
+            }
+
+
+        graph_stats = None
+        if GRAPH_READY and GRAPH is not None:
+            graph_stats = {
+                "nodes": int(GRAPH.number_of_nodes()),
+                "edges": int(GRAPH.number_of_edges()),
+            }
+
+        return {
+            "status": status,
+            "tx_count": tx_count,
+            "ingestion": None if not ing else {
+                "name": ing.name,
+                "last_tx_id": ing.last_tx_id,
+                "last_processed_at": ing.last_processed_at,
+                "total_inserted": ing.total_inserted,
+                "last_error": ing.last_error,
+            },
+            "latest_scoring_run": latest_run_summary,
+            "graph_ready": GRAPH_READY,
+            "graph_error": GRAPH_ERROR,
+            "graph_stats": graph_stats,
+            "tx_source": TX_SOURCE,
+        }
+
+    except ProgrammingError as e:
+        # e.g. tables not created yet
+        raise HTTPException(status_code=503, detail=f"DB not ready/migrated: {e}")
+    
+@app.get("/ready")
+def ready(db: Session = Depends(get_db)):
+    status = ingestion_status(db)
+
+    if status["status"] != "ok":
+        raise HTTPException(status_code=503, detail=status)
+
+    return {"status": "ready"}
