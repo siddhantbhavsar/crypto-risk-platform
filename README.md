@@ -1,177 +1,273 @@
-# Crypto Risk Platform (AML + AI) — WIP
+# Crypto AML Risk Platform
 
-A modular, extensible sandbox project to practice building fintech-grade crypto transaction monitoring infrastructure.
+A containerized streaming crypto risk analytics platform that simulates how real-world fintech AML backends ingest transactions, build graph models, compute wallet risk scores, and expose query APIs.
 
-This project simulates a simplified AML risk platform similar to what modern fintech and blockchain analytics companies build. It focuses on architecture, reproducibility, and engineering discipline — not just modeling.
-
----
-
-## Why this project
-
-I work in transaction monitoring / AML and I’m building this to level up into platform engineering for fintech systems:
-
-- reproducible services
-- persistent audit trails
-- containerized deployment
-- CI/CD pipelines
-- scalable architecture (Kafka / Kubernetes / AWS coming next)
+This project demonstrates end-to-end platform engineering across streaming ingestion, persistence, analytics, and API serving.
 
 ---
 
-## Current Architecture
+## Overview
 
-Batch scoring pipeline:
+This system simulates a cryptocurrency transaction monitoring backend.
 
-Transaction Simulator (CSV)
-→ Graph Builder (NetworkX)
-→ Risk Engine (multi-hop exposure scoring)
-→ FastAPI service (Docker)
-→ PostgreSQL (persisted scoring runs + scores)
+Synthetic blockchain transactions are streamed through Kafka, persisted in PostgreSQL, converted into a graph model, and scored using a multi-hop exposure algorithm. Results are versioned and served via a FastAPI service.
 
-Future roadmap:
-
-Kafka streaming ingestion
-→ consumer writes transactions to Postgres
-→ scoring reads from Postgres
-→ CI/CD + Kubernetes + Terraform + AWS
+The architecture mirrors a simplified production fintech data platform.
 
 ---
 
-## Features (Current)
+## Architecture
 
-- Synthetic crypto-style transaction generation
-- Directed graph modeling of wallet flows
-- Multi-hop illicit exposure scoring
-- Explainable risk outputs (exposure breakdown + degrees)
-- FastAPI backend service
-- PostgreSQL persistence:
-  - scoring_runs table (metadata per run)
-  - risk_scores table (wallet scores + explainability)
-- Alembic migrations for schema evolution
-- Docker + docker-compose runtime
-- GitHub Actions CI (lint + tests + docker build)
+```
+Transaction Simulator
+        ↓
+Kafka Producer
+        ↓
+Kafka Topic (transactions)
+        ↓
+Kafka Consumer
+        ↓
+PostgreSQL (transactions table)
+        ↓
+Graph Builder + Risk Engine
+        ↓
+FastAPI Service
+        ↓
+Risk Score APIs
+```
 
 ---
 
-## Risk Scoring Logic
+## Services (Docker Compose)
 
-Each wallet is a node in a directed transaction graph.
+The system runs as multiple containers:
 
-Risk is based on multi-hop exposure to illicit wallets:
+### API (FastAPI)
 
-- 0-hop: wallet itself illicit
-- 1-hop: neighbors
-- 2-hop: neighbors of neighbors
+* Builds transaction graph
+* Runs wallet risk scoring
+* Stores scoring runs
+* Serves query endpoints
 
-Weighted scoring:
+### PostgreSQL
 
-score = sum(weight × illicit_count_by_hop)
+Persistent storage for:
 
-Then normalized by:
+* transactions
+* scoring_runs
+* risk_scores
 
-score / sqrt(in_degree + out_degree)
+Acts as the system of record.
 
-This reduces bias toward high-traffic hub wallets.
+### Kafka
+
+Streaming message broker for transaction ingestion.
+
+### Zookeeper
+
+Kafka coordination service.
+
+### Consumer Worker
+
+Reads Kafka transactions and writes them into PostgreSQL.
+
+---
+
+## Database Schema
+
+### transactions
+
+Stores ingested blockchain transactions.
+
+Fields:
+
+* tx_id
+* sender
+* receiver
+* amount
+* timestamp
+
+---
+
+### scoring_runs
+
+Tracks each scoring execution.
+
+Fields:
+
+* id
+* created_at
+* tx_source
+* config_json
+
+Enables historical reproducibility.
+
+---
+
+### risk_scores
+
+Stores wallet risk results per run.
+
+Fields:
+
+* wallet
+* risk_score
+* exposures
+* in_degree
+* out_degree
+* run_id
+
+Each scoring run produces a snapshot.
+
+---
+
+## Risk Scoring Model
+
+The platform builds a directed transaction graph and applies a multi-hop exposure heuristic.
+
+### Steps
+
+1. Build directed wallet graph from transactions
+2. Seed a percentage of wallets as illicit
+3. Propagate risk through graph hops
+4. Apply weighted scoring
+5. Normalize by node degree
+
+Score formula:
+
+```
+score = weighted illicit exposure / sqrt(in_degree + out_degree)
+```
+
+The illicit seed is configurable via environment variable for reproducibility.
 
 ---
 
 ## API Endpoints
 
-GET /health  
-Service health check
+### Health
 
-GET /score/{wallet}  
-In-memory scoring (computed live from loaded graph)
+GET /health
 
-POST /run-score  
-Compute scores for all wallets and persist a scoring run
+Returns service status.
 
-GET /scores/top?n=20  
-Top risky wallets from the latest scoring run
+---
 
-GET /scores/{wallet}  
-Latest stored score for a wallet
+### Reload Graph
 
-Swagger UI:
+POST /reload-graph
 
+Rebuilds in-memory graph from database transactions.
+
+---
+
+### Run Scoring
+
+POST /run-score
+
+Executes a full scoring run and stores results.
+
+---
+
+### Top Scores
+
+GET /scores/top?n=20
+
+Returns highest-risk wallets from the latest run.
+
+---
+
+### Wallet Score
+
+GET /scores/{wallet}
+
+Returns latest stored score for a wallet.
+
+---
+
+## Running the System
+
+### Build and start all services
+
+```
+docker compose up -d --build
+```
+
+---
+
+### Generate synthetic transactions
+
+```
+docker compose exec api python services/ingestion/simulator.py
+```
+
+---
+
+### Publish transactions to Kafka
+
+```
+docker compose exec api python services/ingestion/kafka_producer.py
+```
+
+---
+
+### Reload graph
+
+```
+POST http://127.0.0.1:8000/reload-graph
+```
+
+---
+
+### Run scoring
+
+```
+POST http://127.0.0.1:8000/run-score
+```
+
+---
+
+### View API docs
+
+Open in browser:
+
+```
 http://127.0.0.1:8000/docs
+```
 
 ---
 
-## Run locally (Windows friendly)
+## Key Engineering Concepts Demonstrated
 
-Create virtual environment and install dependencies:
-
-python -m venv .venv  
-.venv\Scripts\activate  
-python -m pip install -r requirements.txt
-
-Generate sample transactions:
-
-python services\ingestion\simulator.py
-
-Run API locally:
-
-python -m uvicorn services.api.main:app --reload
+* Streaming ingestion with Kafka
+* Consumer batch persistence
+* PostgreSQL schema design
+* Graph-based analytics
+* Experiment reproducibility
+* Container orchestration
+* Service separation
+* API-driven scoring workflows
 
 ---
 
-## Run with Docker Compose
+## Project Goals
 
-docker compose up --build -d
-
-Check database tables:
-
-docker compose exec db psql -U risk -d riskdb -c "\dt"
+This project demonstrates how to design a scalable backend pipeline for financial risk analytics. It emphasizes architecture clarity, reproducibility, and production-style service boundaries.
 
 ---
 
-## Database Migrations (Alembic)
+## Future Roadmap
 
-Create migration:
+* Incremental graph updates
+* Kafka dead-letter queues
+* Kubernetes deployment
+* Cloud infrastructure provisioning
+* Monitoring and metrics
+* Real-time scoring triggers
 
-python -m alembic revision --autogenerate -m "your message"
-
-Apply migrations:
-
-python -m alembic upgrade head
-
----
-
-## Code Quality and CI
-
-This project uses:
-
-- ruff for linting
-- pytest for tests
-- GitHub Actions CI to run lint/tests and validate Docker builds
-
-Run locally:
-
-python -m ruff check .  
-python -m pytest -q
 
 ---
 
-## Roadmap
+## Author
 
-- Add transactions table and persist ingested data
-- Kafka ingestion (producer + consumer)
-- Scoring reads from Postgres instead of CSV
-- Docker health checks + CI smoke tests
-- Kubernetes deployment manifests
-- Terraform infrastructure on AWS
-- Optional Java ingestion service
-
----
-
-## Project Goal
-
-This repository is a long-running sandbox to simulate how real AML risk platforms are engineered:
-
-reproducible  
-scalable  
-auditable  
-production-ready
-
-Each iteration adds another layer of real-world backend architecture.
+Built as a portfolio platform engineering project focused on fintech risk systems.
