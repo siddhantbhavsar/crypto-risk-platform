@@ -4,7 +4,6 @@
 
 This document explains the architecture, components, and internal behavior of the Crypto AML Risk Platform. It is intended for:
 
-* interview walkthroughs
 * technical reviews
 * onboarding new contributors
 * demonstrating system design and engineering decisions
