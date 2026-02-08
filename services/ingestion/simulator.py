@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import random
 from datetime import datetime, timedelta
 from typing import List
@@ -22,6 +23,7 @@ def simulate_transactions(
     tx_id, ts, src, dst, amount
     """
     random.seed(seed)
+    RUN_PREFIX = int(time.time())
 
     wallets = [generate_wallet_id(i) for i in range(n_wallets)]
     start = datetime.utcnow() - timedelta(days=start_days_ago)
@@ -38,8 +40,8 @@ def simulate_transactions(
 
         rows.append(
             {
-                "tx_id": f"T{t:06d}",
-                "ts": ts.isoformat(),
+                "tx_id": f"T{RUN_PREFIX}_{t:06d}",
+                "timestamp": ts.isoformat(),
                 "src": src,
                 "dst": dst,
                 "amount": amount,

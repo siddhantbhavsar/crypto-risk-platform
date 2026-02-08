@@ -3,6 +3,9 @@ import os
 import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import ProgrammingError
+
+
 
 from services.scoring.risk_engine import (
     RiskConfig,
@@ -22,6 +25,8 @@ TX_PATH = "data/transactions.csv"
 
 cfg = RiskConfig(hop_weights=(1.0, 0.6, 0.3), degree_normalize=True)
 
+GRAPH_READY = False
+GRAPH_ERROR = None
 GRAPH = None
 ILLICIT = None
 ILLICIT_SEED = int(os.getenv("ILLICIT_SEED", "42"))
@@ -39,63 +44,103 @@ def load_transactions_from_db(db):
 
 @app.on_event("startup")
 def startup():
-    global GRAPH, ILLICIT
+    global GRAPH, ILLICIT, GRAPH_READY, GRAPH_ERROR
 
-    if TX_SOURCE == "db":
-        # Load transactions from Postgres
-        db = SessionLocal()
-        try:
-            tx_list = load_transactions_from_db(db)
-        finally:
-            db.close()
+    GRAPH_READY = False
+    GRAPH_ERROR = None
 
-        if not tx_list:
-            raise RuntimeError(
-                "TX_SOURCE=db but no transactions found in DB. Run producer/consumer first."
-                )
+    try:
+        if TX_SOURCE == "db":
+            db = SessionLocal()
+            try:
+                tx_list = load_transactions_from_db(db)
+            finally:
+                db.close()
 
-        txs = pd.DataFrame(tx_list)
+            if not tx_list:
+                GRAPH_ERROR = "TX_SOURCE=db but no transactions found. Ingest first, then POST /reload-graph."
+                return
 
-    else:
-        # Load transactions from CSV (existing behavior)
-        try:
+            txs = pd.DataFrame(tx_list)
+
+        else:
             txs = pd.read_csv(TX_PATH)
-        except FileNotFoundError:
-            raise RuntimeError(f"Missing {TX_PATH}. Run: python services/ingestion/simulator.py")
 
-    GRAPH = build_tx_graph(txs)
-    ILLICIT = pick_seed_illicit_wallets(GRAPH.nodes, pct=0.05, seed=ILLICIT_SEED)
+        GRAPH = build_tx_graph(txs)
+        ILLICIT = pick_seed_illicit_wallets(GRAPH.nodes, pct=0.05, seed=ILLICIT_SEED)
+
+        GRAPH_READY = True
+
+    except ProgrammingError as e:
+        # Common case: transactions table doesn't exist yet (migrations not applied)
+        GRAPH_ERROR = f"Graph not loaded at startup (DB not ready/migrated): {e}"
+        GRAPH_READY = False
+
+    except Exception as e:
+        GRAPH_ERROR = f"Graph not loaded at startup: {e}"
+        GRAPH_READY = False
+
 
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "graph_ready": GRAPH_READY,
+        "graph_error": GRAPH_ERROR,
+        "tx_source": TX_SOURCE,
+    }
+
 
 
 
 @app.post("/reload-graph")
 def reload_graph(db: Session = Depends(get_db)):
-    global GRAPH, ILLICIT
+    global GRAPH, ILLICIT, GRAPH_READY, GRAPH_ERROR
 
-    if TX_SOURCE != "db":
-        return {"ok": False, "error": "Set TX_SOURCE=db to use this endpoint."}
+    try:
+        if TX_SOURCE != "db":
+            GRAPH_READY = False
+            GRAPH_ERROR = "Set TX_SOURCE=db to use this endpoint."
+            raise HTTPException(status_code=400, detail=GRAPH_ERROR)
 
-    tx_list = load_transactions_from_db(db)
-    if not tx_list:
-        return {"ok": False, "error": "No transactions found in DB."}
+        tx_list = load_transactions_from_db(db)
+        if not tx_list:
+            GRAPH_READY = False
+            GRAPH_ERROR = "No transactions found in DB."
+            raise HTTPException(status_code=400, detail=GRAPH_ERROR)
 
-    txs = pd.DataFrame(tx_list)
-    GRAPH = build_tx_graph(txs)
-    ILLICIT = pick_seed_illicit_wallets(GRAPH.nodes, pct=0.05, seed=ILLICIT_SEED)
+        txs = pd.DataFrame(tx_list)
+        GRAPH = build_tx_graph(txs)
+        ILLICIT = pick_seed_illicit_wallets(GRAPH.nodes, pct=0.05, seed=ILLICIT_SEED)
 
+        GRAPH_READY = True
+        GRAPH_ERROR = None
+        return {"ok": True, "tx_count": len(tx_list)}
 
-    return {"ok": True, "tx_count": len(tx_list)}
+    except ProgrammingError as e:
+        # common: table missing / migrations not applied
+        GRAPH_READY = False
+        GRAPH_ERROR = f"DB not ready/migrated: {e}"
+        raise HTTPException(status_code=503, detail=GRAPH_ERROR)
+
+    except HTTPException:
+        # already set GRAPH_ERROR above
+        raise
+
+    except Exception as e:
+        GRAPH_READY = False
+        GRAPH_ERROR = str(e)
+        raise HTTPException(status_code=500, detail=GRAPH_ERROR)
 
 
 # --- OLD: in-memory scoring (still useful) ---
 @app.get("/score/{wallet}")
 def score_in_memory(wallet: str):
+    if not GRAPH_READY:
+        raise HTTPException(status_code=503, detail=f"Graph not ready: {GRAPH_ERROR}")
+    
     if GRAPH is None or ILLICIT is None:
         raise HTTPException(status_code=503, detail="Service not ready")
 
@@ -108,6 +153,9 @@ def score_in_memory(wallet: str):
 # --- NEW: persist a scoring run + all wallet scores ---
 @app.post("/run-score")
 def run_score(db: Session = Depends(get_db)):
+    if not GRAPH_READY:
+        raise HTTPException(status_code=503, detail=f"Graph not ready: {GRAPH_ERROR}")
+
     if GRAPH is None or ILLICIT is None:
         raise HTTPException(status_code=503, detail="Service not ready")
 
@@ -143,9 +191,19 @@ def run_score(db: Session = Depends(get_db)):
 
 # --- NEW: query from Postgres ---
 @app.get("/scores/top")
-def top_scores(n: int = 20, db: Session = Depends(get_db)):
-    n = max(1, min(n, 500))
-    scores = crud.get_top_scores_latest(db, n=n)
+def top_scores(
+    n: int | None = None,
+    limit: int | None = None,
+    db: Session = Depends(get_db),
+):
+    size = limit if limit is not None else n
+    if size is None:
+        size = 20
+
+    size = max(1, min(size, 500))
+
+    scores = crud.get_top_scores_latest(db, n=size)
+
     return [
         {
             "wallet": s.wallet,
@@ -155,6 +213,8 @@ def top_scores(n: int = 20, db: Session = Depends(get_db)):
         }
         for s in scores
     ]
+
+
 
 
 @app.get("/scores/{wallet}")

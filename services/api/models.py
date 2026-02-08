@@ -52,3 +52,13 @@ class Transaction(Base):
     receiver = Column(String, index=True)
     amount = Column(Float)
     timestamp = Column(DateTime, default=datetime.utcnow)
+
+class IngestionState(Base):
+    __tablename__ = "ingestion_state"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True, index=True)  # e.g. "transactions_consumer"
+    last_tx_id = Column(String, nullable=True)
+    last_processed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    total_inserted = Column(Integer, default=0, nullable=False)
+    last_error = Column(String, nullable=True)

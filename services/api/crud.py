@@ -3,13 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from services.api.models import RiskScore, ScoringRun
 
-from .models import Transaction
+from .models import Transaction, IngestionState
 
 
 def create_scoring_run(
@@ -62,12 +62,13 @@ def upsert_transactions(db, tx_rows):
     stmt = insert(Transaction).values(tx_rows)
 
     # If tx_id already exists, do nothing (dedupe)
-    stmt = stmt.on_conflict_do_nothing(index_elements=["tx_id"])
+
+    stmt = stmt.on_conflict_do_nothing(index_elements=["tx_id"]).returning(Transaction.tx_id)
 
     result = db.execute(stmt)
+    inserted_ids = result.scalars().all()
     db.commit()
-    # result.rowcount may be None depending on driver; safe fallback:
-    return result.rowcount or 0
+    return len(inserted_ids)
 
 def get_top_scores_latest(db: Session, n: int = 20) -> List[RiskScore]:
     latest = get_latest_run(db)
@@ -101,3 +102,21 @@ def get_latest_run(db: Session) -> Optional[ScoringRun]:
 
 def fetch_all_transactions(db):
     return db.query(Transaction).all()
+
+def record_ingestion(db, name: str, last_tx_id: str | None, inserted: int, last_error: str | None = None):
+    stmt = insert(IngestionState).values(
+        name=name,
+        last_tx_id=last_tx_id,
+        total_inserted=inserted,
+        last_error=last_error,
+    ).on_conflict_do_update(
+        index_elements=["name"],
+        set_={
+            "last_tx_id": last_tx_id,
+            "last_processed_at": func.now(),
+            "total_inserted": IngestionState.total_inserted + inserted,
+            "last_error": last_error,
+        },
+    )
+    db.execute(stmt)
+    db.commit()
