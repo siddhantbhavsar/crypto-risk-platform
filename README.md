@@ -2,7 +2,7 @@
 
 A fintech-style backend platform that simulates a production crypto AML transaction monitoring system.
 
-This project demonstrates how a real-world risk pipeline is built: streaming ingestion, persistent storage, graph analytics, scoring orchestration, and operational observability — all containerized and reproducible.
+This project demonstrates how a real-world risk pipeline is built: streaming ingestion, persistent storage, graph analytics, scoring orchestration, automated migrations, and operational observability — all containerized and reproducible.
 
 ---
 
@@ -25,12 +25,19 @@ The goal is to showcase production-grade backend engineering patterns used in AM
 
 ## 🧱 Architecture
 
-```
-Simulator → Kafka → Consumer → Postgres
-                     ↓
-                FastAPI API
-                     ↓
-              Risk Scoring Engine
+```mermaid
+flowchart LR
+  sim[Simulator] --> prod[Kafka Producer]
+  prod --> k[(Kafka Topic: transactions)]
+  k --> cons[Kafka Consumer]
+  cons --> db[(Postgres)]
+
+  db --> api[FastAPI API]
+  api --> graph[Graph Reload]
+  api --> score[Risk Scoring Engine]
+
+  score --> rs[(risk_scores table)]
+  api --> obs[/ingestion/status/]
 ```
 
 All services run via Docker Compose.
@@ -62,6 +69,8 @@ Postgres stores:
 * `scoring_runs`
 * `risk_scores`
 
+Schema is managed via **Alembic migrations**.
+
 ---
 
 ### Graph-Based Risk Engine
@@ -89,24 +98,23 @@ GET  /health
 
 ### Observability
 
-`/ingestion/status` exposes real operational state:
+`/ingestion/status` exposes real operational telemetry:
 
-* transaction counts
 * ingestion progress
-* latest scoring run
+* transaction throughput (last 5 minutes)
+* time since last ingestion
 * graph health
 * system readiness
 
-Example response:
+Example:
 
 ```json
 {
   "status": "ok",
-  "tx_count": 4000,
-  "ingestion": {
-    "name": "transactions_consumer",
-    "total_inserted": 4000,
-    "last_error": null
+  "tx_count": 2000,
+  "metrics": {
+    "total_inserted": 2000,
+    "tx_per_min_5m": 400.0
   },
   "graph_ready": true
 }
@@ -155,11 +163,9 @@ requirements.txt
 docker compose up -d --build
 ```
 
-Create database tables (dev mode):
+Database schema is applied automatically via the **migrate** service using Alembic.
 
-```
-docker compose exec api python -c "from services.api.db import engine, Base; import services.api.models; Base.metadata.create_all(bind=engine)"
-```
+No manual setup is required.
 
 ---
 
@@ -192,33 +198,6 @@ This automatically:
 
 ---
 
-## 🔬 Key Engineering Highlights
-
-### Idempotent ingestion
-
-Duplicate transactions are safely ignored via Postgres upserts. Accurate insert counts are computed using `RETURNING` instead of unreliable rowcount behavior.
-
----
-
-### Schema normalization
-
-The ingestion pipeline supports both:
-
-```
-src/dst
-sender/receiver
-```
-
-and normalizes records to prevent null wallet corruption.
-
----
-
-### Operational observability
-
-The platform exposes ingestion and scoring health via structured API endpoints suitable for dashboards and monitoring systems.
-
----
-
 ## 🧪 Development Workflow
 
 Hot reload is enabled inside Docker:
@@ -231,10 +210,42 @@ Consumer restarts only when ingestion code changes.
 
 ---
 
+## 🔍 Linting & CI
+
+Before pushing changes:
+
+```
+docker compose exec api ruff check .
+docker compose exec api pytest
+```
+
+CI runs lint + tests automatically on GitHub push.
+
+---
+
+## 🔬 Key Engineering Highlights
+
+### Idempotent ingestion
+
+Duplicate transactions are safely ignored via Postgres upserts. Accurate insert counts are computed using `RETURNING` instead of unreliable rowcount behavior.
+
+---
+
+### Automated migrations
+
+Database schema is versioned with Alembic and applied automatically during container startup.
+
+---
+
+### Operational observability
+
+The platform exposes ingestion and scoring health via structured API endpoints suitable for dashboards and monitoring systems.
+
+---
+
 ## 🛣 Future Improvements
 
-* Automatic DB migrations on startup
-* Kafka lag and throughput metrics
+* Kafka lag monitoring
 * Scheduled scoring jobs
 * Risk explainability endpoints
 * Monitoring dashboard UI

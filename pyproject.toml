@@ -5,3 +5,4 @@ exclude = ["alembic/versions/*"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+ignore = ["E501"]

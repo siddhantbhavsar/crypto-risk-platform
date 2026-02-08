@@ -14,7 +14,7 @@ class ScoringRun(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     tx_source = Column(String, nullable=False)  # e.g. "csv:data/transactions.csv"
-    config_json = Column(JSONB, nullable=False) # store hop weights, normalization flags, etc.
+    config_json = Column(JSONB, nullable=False)  # store hop weights, normalization flags, etc.
 
     scores = relationship("RiskScore", back_populates="run")
 
@@ -23,18 +23,14 @@ class RiskScore(Base):
     __tablename__ = "risk_scores"
 
     id = Column(Integer, primary_key=True, index=True)
-    run_id = Column(Integer, 
-                    ForeignKey("scoring_runs.id", 
-                               ondelete="CASCADE"
-                               ), 
-                               nullable=False, 
-                               index=True
-                               )
+    run_id = Column(
+        Integer, ForeignKey("scoring_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     wallet = Column(String, nullable=False, index=True)
     risk_score = Column(Float, nullable=False)
 
-    exposures_json = Column(JSONB, nullable=False)      # list of exposures by hop
+    exposures_json = Column(JSONB, nullable=False)  # list of exposures by hop
     in_degree = Column(Integer, nullable=False)
     out_degree = Column(Integer, nullable=False)
 
@@ -52,6 +48,8 @@ class Transaction(Base):
     receiver = Column(String, index=True)
     amount = Column(Float)
     timestamp = Column(DateTime, default=datetime.utcnow)
+    ingested_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
 
 class IngestionState(Base):
     __tablename__ = "ingestion_state"

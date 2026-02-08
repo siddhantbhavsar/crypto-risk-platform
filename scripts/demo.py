@@ -1,17 +1,19 @@
-import time
 import requests
 
 BASE = "http://localhost:8000"
+
 
 def post(path: str):
     r = requests.post(BASE + path, timeout=60)
     r.raise_for_status()
     return r.json()
 
+
 def get(path: str):
     r = requests.get(BASE + path, timeout=60)
     r.raise_for_status()
     return r.json()
+
 
 def main():
     print("1) Reloading graph...")
@@ -29,6 +31,7 @@ def main():
     print(get("/ingestion/status"))
 
     print("\n✅ Demo complete.")
+
 
 if __name__ == "__main__":
     main()

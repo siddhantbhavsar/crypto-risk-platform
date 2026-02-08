@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import time
 import random
+import time
 from datetime import datetime, timedelta
 from typing import List
 

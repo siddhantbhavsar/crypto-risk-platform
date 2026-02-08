@@ -82,7 +82,7 @@ def risk_score_wallet(g: nx.DiGraph, wallet: str, illicit: Set[str], cfg: RiskCo
 
     if cfg.degree_normalize:
         deg = (g.in_degree(wallet) + g.out_degree(wallet)) or 1
-        raw = raw / (deg ** 0.5)
+        raw = raw / (deg**0.5)
 
     return {
         "wallet": wallet,
@@ -93,8 +93,9 @@ def risk_score_wallet(g: nx.DiGraph, wallet: str, illicit: Set[str], cfg: RiskCo
     }
 
 
-def score_top_wallets(g: nx.DiGraph, illicit: Set[str], 
-                      cfg: RiskConfig, top_n: int = 20) -> pd.DataFrame:
+def score_top_wallets(
+    g: nx.DiGraph, illicit: Set[str], cfg: RiskConfig, top_n: int = 20
+) -> pd.DataFrame:
     rows: List[Dict] = []
     for w in g.nodes:
         r = risk_score_wallet(g, w, illicit, cfg)

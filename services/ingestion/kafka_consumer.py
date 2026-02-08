@@ -8,7 +8,6 @@ from kafka import KafkaConsumer
 from services.api import crud
 from services.api.db import SessionLocal
 
-
 CONSUMER_NAME = "transactions_consumer"
 
 

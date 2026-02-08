@@ -8,6 +8,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgresql://risk:risk@db:5432/riskdb
       KAFKA_TOPIC_TRANSACTIONS: transactions
@@ -82,6 +84,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       PYTHONUNBUFFERED: "1"
       DATABASE_URL: postgresql+psycopg2://risk:risk@db:5432/riskdb
@@ -96,6 +100,16 @@ services:
       - ./data:/app/data
     command: ["python", "-m", "services.ingestion.kafka_consumer"]
     restart: unless-stopped
+
+  migrate:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://risk:risk@db:5432/riskdb
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
 
 
 volumes:

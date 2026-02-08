@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import desc, func
@@ -9,8 +9,7 @@ from sqlalchemy.orm import Session
 
 from services.api.models import RiskScore, ScoringRun
 
-from .models import Transaction, IngestionState
-
+from .models import IngestionState, Transaction
 
 CONSUMER_NAME = "transactions_consumer"
 
@@ -54,6 +53,7 @@ def bulk_insert_risk_scores(
     db.add_all(objs)
     return len(objs)
 
+
 def upsert_transactions(db, tx_rows):
     """
     tx_rows: list[dict] each with keys:
@@ -73,6 +73,7 @@ def upsert_transactions(db, tx_rows):
     db.commit()
     return len(inserted_ids)
 
+
 def get_top_scores_latest(db: Session, n: int = 20) -> List[RiskScore]:
     latest = get_latest_run(db)
     if not latest:
@@ -87,7 +88,6 @@ def get_top_scores_latest(db: Session, n: int = 20) -> List[RiskScore]:
     )
 
 
-
 def get_latest_score_for_wallet(db: Session, wallet: str) -> Optional[RiskScore]:
     return (
         db.query(RiskScore)
@@ -96,34 +96,38 @@ def get_latest_score_for_wallet(db: Session, wallet: str) -> Optional[RiskScore]
         .first()
     )
 
+
 def get_latest_run(db: Session) -> Optional[ScoringRun]:
-    return (
-        db.query(ScoringRun)
-        .order_by(desc(ScoringRun.created_at))
-        .first()
-    )
+    return db.query(ScoringRun).order_by(desc(ScoringRun.created_at)).first()
+
 
 def fetch_all_transactions(db):
     return db.query(Transaction).all()
 
-def record_ingestion(db, name: str, last_tx_id: str | None, inserted: int, last_error: str | None = None):
-    stmt = insert(IngestionState).values(
-        name=name,
-        last_tx_id=last_tx_id,
-        total_inserted=inserted,
-        last_error=last_error,
-    ).on_conflict_do_update(
-        index_elements=["name"],
-        set_={
-            "last_tx_id": last_tx_id,
-            "last_processed_at": func.now(),
-            "total_inserted": IngestionState.total_inserted + inserted,
-            "last_error": last_error,
-        },
+
+def record_ingestion(
+    db, name: str, last_tx_id: str | None, inserted: int, last_error: str | None = None
+):
+    stmt = (
+        insert(IngestionState)
+        .values(
+            name=name,
+            last_tx_id=last_tx_id,
+            total_inserted=inserted,
+            last_error=last_error,
+        )
+        .on_conflict_do_update(
+            index_elements=["name"],
+            set_={
+                "last_tx_id": last_tx_id,
+                "last_processed_at": func.now(),
+                "total_inserted": IngestionState.total_inserted + inserted,
+                "last_error": last_error,
+            },
+        )
     )
     db.execute(stmt)
     db.commit()
-
 
 
 def count_transactions(db: Session) -> int:
@@ -136,3 +140,17 @@ def get_ingestion_state(db: Session, name: str = CONSUMER_NAME) -> IngestionStat
 
 def count_scores_for_run(db: Session, run_id: int) -> int:
     return int(db.query(func.count(RiskScore.id)).filter(RiskScore.run_id == run_id).scalar() or 0)
+
+
+def count_recent_transactions(db: Session, minutes: int = 5) -> int:
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    return int(
+        db.query(func.count(Transaction.id)).filter(Transaction.timestamp >= cutoff).scalar() or 0
+    )
+
+
+def count_ingested_since(db: Session, minutes: int = 5) -> int:
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    return int(
+        db.query(func.count(Transaction.id)).filter(Transaction.ingested_at >= cutoff).scalar() or 0
+    )

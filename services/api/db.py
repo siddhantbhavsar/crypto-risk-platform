@@ -11,8 +11,10 @@ DATABASE_URL = os.getenv(
     "postgresql+psycopg2://risk:risk@localhost:5432/riskdb",
 )
 
+
 class Base(DeclarativeBase):
     pass
+
 
 engine = create_engine(
     DATABASE_URL,
@@ -25,6 +27,7 @@ SessionLocal = sessionmaker(
     autocommit=False,
     expire_on_commit=False,
 )
+
 
 def get_db() -> Generator[Session, None, None]:
     """

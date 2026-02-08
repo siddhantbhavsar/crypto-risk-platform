@@ -53,7 +53,6 @@ def normalize_row(row: Dict[str, str]) -> Optional[Dict[str, Any]]:
         "receiver": receiver,
         "amount": amount,
         "timestamp": timestamp,
-
         # Mirrors (handy for debugging + backward compatibility)
         "src": sender,
         "dst": receiver,
@@ -98,8 +97,7 @@ def main() -> None:
     producer.close()
 
     print(
-        f"✅ Published {sent} transactions to topic='{topic}' via {bootstrap} "
-        f"(skipped={skipped})"
+        f"✅ Published {sent} transactions to topic='{topic}' via {bootstrap} (skipped={skipped})"
     )
 
 

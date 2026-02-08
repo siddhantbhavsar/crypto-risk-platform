@@ -1,11 +1,10 @@
 import os
+from datetime import datetime, timezone
 
 import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import ProgrammingError
-from .models import IngestionState  
-
+from sqlalchemy.orm import Session
 
 from services.scoring.risk_engine import (
     RiskConfig,
@@ -34,18 +33,14 @@ ILLICIT_SEED = int(os.getenv("ILLICIT_SEED", "42"))
 
 def load_transactions_from_db(db):
     rows = crud.fetch_all_transactions(db)
-    return [
-        {"src": r.sender, "dst": r.receiver, "amount": float(r.amount or 0.0)}
-        for r in rows
-    ]
-
-
+    return [{"src": r.sender, "dst": r.receiver, "amount": float(r.amount or 0.0)} for r in rows]
 
 
 @app.on_event("startup")
 def startup():
     global GRAPH, ILLICIT, GRAPH_READY, GRAPH_ERROR
 
+    # --- existing logic below ---
     GRAPH_READY = False
     GRAPH_ERROR = None
 
@@ -58,7 +53,9 @@ def startup():
                 db.close()
 
             if not tx_list:
-                GRAPH_ERROR = "TX_SOURCE=db but no transactions found. Ingest first, then POST /reload-graph."
+                GRAPH_ERROR = (
+                    "TX_SOURCE=db but no transactions found. Ingest first, then POST /reload-graph."
+                )
                 return
 
             txs = pd.DataFrame(tx_list)
@@ -72,15 +69,12 @@ def startup():
         GRAPH_READY = True
 
     except ProgrammingError as e:
-        # Common case: transactions table doesn't exist yet (migrations not applied)
         GRAPH_ERROR = f"Graph not loaded at startup (DB not ready/migrated): {e}"
         GRAPH_READY = False
 
     except Exception as e:
         GRAPH_ERROR = f"Graph not loaded at startup: {e}"
         GRAPH_READY = False
-
-
 
 
 @app.get("/health")
@@ -91,8 +85,6 @@ def health():
         "graph_error": GRAPH_ERROR,
         "tx_source": TX_SOURCE,
     }
-
-
 
 
 @app.post("/reload-graph")
@@ -140,7 +132,7 @@ def reload_graph(db: Session = Depends(get_db)):
 def score_in_memory(wallet: str):
     if not GRAPH_READY:
         raise HTTPException(status_code=503, detail=f"Graph not ready: {GRAPH_ERROR}")
-    
+
     if GRAPH is None or ILLICIT is None:
         raise HTTPException(status_code=503, detail="Service not ready")
 
@@ -162,7 +154,7 @@ def run_score(db: Session = Depends(get_db)):
     # store run metadata
     run = crud.create_scoring_run(
         db,
-        tx_source = f"{TX_SOURCE}:{TX_PATH}" if TX_SOURCE == "csv" else "db:transactions",
+        tx_source=f"{TX_SOURCE}:{TX_PATH}" if TX_SOURCE == "csv" else "db:transactions",
         config_json={
             "hop_weights": list(cfg.hop_weights),
             "degree_normalize": cfg.degree_normalize,
@@ -215,8 +207,6 @@ def top_scores(
     ]
 
 
-
-
 @app.get("/scores/{wallet}")
 def latest_score(wallet: str, db: Session = Depends(get_db)):
     s = crud.get_latest_score_for_wallet(db, wallet=wallet)
@@ -233,44 +223,48 @@ def latest_score(wallet: str, db: Session = Depends(get_db)):
         "created_at": s.created_at,
     }
 
+
 @app.get("/ingestion/status")
 def ingestion_status(db: Session = Depends(get_db)):
-    """
-    Observability endpoint:
-    - tx_count
-    - ingestion_state for the consumer
-    - latest scoring run summary
-    - graph_ready + optional graph_stats
-    """
     try:
         tx_count = crud.count_transactions(db)
-
         ing = crud.get_ingestion_state(db, name="transactions_consumer")
-
         latest_run = crud.get_latest_run(db)
-        latest_run_summary = None
-        # --- derive overall system status ---
+
+        # --- metrics ---
+        seconds_since_last_processed = None
+        ingested_last_5m = None
+        tx_per_min_5m = None
+
+        if ing and ing.last_processed_at:
+            now = datetime.now(timezone.utc)
+            last = ing.last_processed_at
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
+            seconds_since_last_processed = (now - last).total_seconds()
+
+        if ing is not None:
+            ingested_last_5m = crud.count_ingested_since(db, minutes=5)
+            tx_per_min_5m = ingested_last_5m / 5.0
+
+        # --- status (precedence: degraded > starting > ok) ---
         status = "ok"
 
-        # --- derive overall system status ---
-        status = "ok"
-
-        # if graph not loaded yet, you're still starting up
-        if not GRAPH_READY:
+        # starting conditions
+        if tx_count == 0 or not GRAPH_READY or ing is None:
             status = "starting"
 
-        # if ingestion_state isn't created yet (fresh DB), also starting
-        if ing is None:
-            status = "starting"
-
-        # any recorded errors -> degraded
+        # degraded conditions
         if ing and ing.last_error:
             status = "degraded"
 
         if GRAPH_ERROR:
-            status = "degraded"
+            # ignore stale startup message once tx_count > 0
+            if not ("no transactions found" in str(GRAPH_ERROR).lower() and tx_count > 0):
+                status = "degraded"
 
-
+        # --- latest scoring run summary ---
+        latest_run_summary = None
         if latest_run:
             wallets_scored = crud.count_scores_for_run(db, run_id=latest_run.id)
             latest_run_summary = {
@@ -280,7 +274,6 @@ def ingestion_status(db: Session = Depends(get_db)):
                 "wallets_scored": wallets_scored,
                 "config_json": latest_run.config_json,
             }
-
 
         graph_stats = None
         if GRAPH_READY and GRAPH is not None:
@@ -292,12 +285,17 @@ def ingestion_status(db: Session = Depends(get_db)):
         return {
             "status": status,
             "tx_count": tx_count,
-            "ingestion": None if not ing else {
+            "metrics": None
+            if not ing
+            else {
                 "name": ing.name,
                 "last_tx_id": ing.last_tx_id,
                 "last_processed_at": ing.last_processed_at,
                 "total_inserted": ing.total_inserted,
                 "last_error": ing.last_error,
+                "seconds_since_last_processed": seconds_since_last_processed,
+                "ingested_last_5m": ingested_last_5m,
+                "tx_per_min_5m": tx_per_min_5m,
             },
             "latest_scoring_run": latest_run_summary,
             "graph_ready": GRAPH_READY,
@@ -307,9 +305,9 @@ def ingestion_status(db: Session = Depends(get_db)):
         }
 
     except ProgrammingError as e:
-        # e.g. tables not created yet
         raise HTTPException(status_code=503, detail=f"DB not ready/migrated: {e}")
-    
+
+
 @app.get("/ready")
 def ready(db: Session = Depends(get_db)):
     status = ingestion_status(db)

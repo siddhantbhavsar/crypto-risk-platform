@@ -14,6 +14,7 @@ def test_build_tx_graph_creates_nodes_and_edges():
     assert g.number_of_nodes() == 3
     assert g.number_of_edges() == 2
 
+
 def test_risk_score_wallet_returns_expected_fields():
     txs = pd.DataFrame([{"src": "W0001", "dst": "W0002"}])
     g = build_tx_graph(txs)
