@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import networkx as nx
 import pandas as pd
@@ -102,3 +103,108 @@ def score_top_wallets(
         rows.append({"wallet": r["wallet"], "risk_score": r["risk_score"]})
     df = pd.DataFrame(rows).sort_values("risk_score", ascending=False).head(top_n)
     return df
+
+def k_hop_layers_undirected(g: nx.DiGraph, start: str, max_hops: int) -> list[set[str]]:
+    """
+    layers[h] = set of nodes at EXACTLY h undirected hops from start
+    layers[0] = {start}
+    """
+    if start not in g:
+        return []
+
+    layers: list[set[str]] = [{start}]
+    visited: set[str] = {start}
+    frontier: set[str] = {start}
+
+    for _hop in range(1, max_hops + 1):
+        nxt: set[str] = set()
+        for n in frontier:
+            nxt |= neighbors_undirected(g, n)  # uses your existing helper
+        nxt -= visited
+        layers.append(nxt)
+        visited |= nxt
+        frontier = nxt
+        if not frontier:
+            # keep appending empties is fine; we've already appended this hop
+            continue
+
+    return layers
+
+
+def explain_wallet_risk(
+    g: nx.DiGraph,
+    wallet: str,
+    illicit: set[str],
+    cfg: Any,  # use your RiskConfig type if you want
+    max_hops: Optional[int] = None,
+    per_hop_limit: int = 15,
+    total_limit: int = 50,
+) -> dict[str, Any]:
+    """
+    Explain score with:
+      - exact-hop illicit wallets (interpretability)
+      - weighted contribution per hop
+      - top contributors
+
+    NOTE: Your stored exposures_json is cumulative-by-hop.
+          This explain output is exact-by-hop.
+    """
+    if wallet not in g:
+        return {"wallet": wallet, "reason": "wallet_not_in_graph"}
+
+    hop_weights = tuple(cfg.hop_weights)
+    if max_hops is None:
+        max_hops = len(hop_weights) - 1
+    max_hops = max(0, min(int(max_hops), len(hop_weights) - 1))
+
+    layers = k_hop_layers_undirected(g, wallet, max_hops)
+
+    in_deg = int(g.in_degree(wallet))
+    out_deg = int(g.out_degree(wallet))
+    deg = (in_deg + out_deg) or 1
+
+    norm = math.sqrt(deg) if getattr(cfg, "degree_normalize", False) else 1.0
+
+    hop_breakdown: list[dict[str, Any]] = []
+    contributors: list[dict[str, Any]] = []
+
+    for hop in range(0, max_hops + 1):
+        layer = layers[hop] if hop < len(layers) else set()
+        illicit_here = sorted([n for n in layer if n in illicit])
+
+        w = float(hop_weights[hop])
+        hop_contrib = (w * len(illicit_here)) / norm
+        per_wallet = w / norm if illicit_here else 0.0
+
+        hop_breakdown.append(
+            {
+                "hop": hop,
+                "weight": w,
+                "illicit_count_exact": len(illicit_here),
+                "contribution": round(hop_contrib, 6),
+                "illicit_wallets_sample": illicit_here[:per_hop_limit],
+                "sample_truncated": len(illicit_here) > per_hop_limit,
+            }
+        )
+
+        for n in illicit_here:
+            contributors.append(
+                {"wallet": n, "hop": hop, "weight": w, "contribution": round(per_wallet, 6)}
+            )
+
+    contributors.sort(key=lambda x: (-x["contribution"], x["hop"], x["wallet"]))
+    if len(contributors) > total_limit:
+        contributors = contributors[:total_limit]
+
+    explain_score = sum(item["contribution"] for item in hop_breakdown)
+
+    return {
+        "wallet": wallet,
+        "in_degree": in_deg,
+        "out_degree": out_deg,
+        "degree_normalize": bool(getattr(cfg, "degree_normalize", False)),
+        "normalization_factor": round(float(norm), 6),
+        "hop_breakdown": hop_breakdown,
+        "top_contributors": contributors,
+        "explain_score": round(float(explain_score), 6),
+    }

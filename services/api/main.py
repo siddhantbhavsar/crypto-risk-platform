@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from services.scoring.risk_engine import (
     RiskConfig,
     build_tx_graph,
+    explain_wallet_risk,
     pick_seed_illicit_wallets,
     risk_score_wallet,
 )
@@ -223,6 +224,79 @@ def latest_score(wallet: str, db: Session = Depends(get_db)):
         "created_at": s.created_at,
     }
 
+@app.get("/scores/explain/{wallet}")
+def explain_score(
+    wallet: str,
+    max_hops: int | None = None,
+    per_hop_limit: int = 15,
+    total_limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    # anchor to stored score so "explain" refers to something persisted
+    s = crud.get_latest_score_for_wallet(db, wallet=wallet)
+    if not s:
+        raise HTTPException(status_code=404, detail=f"No stored score for wallet {wallet}")
+
+    run = crud.get_run_by_id(db, run_id=s.run_id)
+
+    # ensure graph is loaded
+    if not GRAPH_READY or GRAPH is None or ILLICIT is None:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Graph not ready: {GRAPH_ERROR}. Run POST /reload-graph first.",
+        )
+
+    # build config from run.config_json if present, else fallback to global cfg
+    cfg_local = cfg
+    if run and isinstance(run.config_json, dict):
+        try:
+            hop_weights = tuple(run.config_json.get("hop_weights", list(cfg.hop_weights)))
+            degree_normalize = bool(run.config_json.get("degree_normalize", cfg.degree_normalize))
+            cfg_local = RiskConfig(hop_weights=hop_weights, degree_normalize=degree_normalize)
+        except Exception:
+            cfg_local = cfg
+
+    # clamp params
+    per_hop_limit = max(1, min(int(per_hop_limit), 100))
+    total_limit = max(1, min(int(total_limit), 200))
+
+    explanation = explain_wallet_risk(
+        GRAPH,
+        wallet=wallet,
+        illicit=ILLICIT,
+        cfg=cfg_local,
+        max_hops=max_hops,
+        per_hop_limit=per_hop_limit,
+        total_limit=total_limit,
+    )
+
+    if explanation.get("reason") == "wallet_not_in_graph":
+        raise HTTPException(status_code=404, detail=f"Wallet {wallet} not found in graph")
+
+    return {
+        "wallet": wallet,
+        "stored_score": {
+            "risk_score": float(s.risk_score),
+            "exposures_cumulative": s.exposures_json,
+            "in_degree": s.in_degree,
+            "out_degree": s.out_degree,
+            "run_id": s.run_id,
+            "created_at": s.created_at,
+        },
+        "run": None
+        if not run
+        else {
+            "run_id": run.id,
+            "created_at": run.created_at,
+            "tx_source": run.tx_source,
+            "config_json": run.config_json,
+        },
+        "explainability": explanation,
+        "notes": {
+            "exposures_in_db_are_cumulative": True,
+            "explainability_uses_exact_hops": True,
+        },
+    }
 
 @app.get("/ingestion/status")
 def ingestion_status(db: Session = Depends(get_db)):

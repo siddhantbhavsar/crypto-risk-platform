@@ -154,3 +154,6 @@ def count_ingested_since(db: Session, minutes: int = 5) -> int:
     return int(
         db.query(func.count(Transaction.id)).filter(Transaction.ingested_at >= cutoff).scalar() or 0
     )
+
+def get_run_by_id(db: Session, run_id: int) -> Optional[ScoringRun]:
+    return db.query(ScoringRun).filter(ScoringRun.id == run_id).first()

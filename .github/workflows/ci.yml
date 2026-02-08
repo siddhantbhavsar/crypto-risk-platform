@@ -8,6 +8,7 @@ on:
 jobs:
   test-and-lint:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,26 +17,35 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          pip install -r requirements.txt
 
       - name: Lint (ruff)
         run: |
-          python -m ruff check .
+          PYTHONPATH=. python -m ruff check .
+
+      # Optional: enforce formatting if you're using ruff format
+      # - name: Format check (ruff)
+      #   run: |
+      #     PYTHONPATH=. python -m ruff format --check .
 
       - name: Run tests (pytest)
         run: |
-          python -m pytest -q
+          PYTHONPATH=. python -m pytest -q
 
-  docker-build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Build Docker image
+      # --- Docker validation ---
+      - name: Docker build (api)
         run: |
-          docker build -t crypto-risk-platform:ci .
+          docker compose build api
+
+      - name: Run tests in Docker (api container)
+        run: |
+          docker compose run --rm api pytest -q
+
+      - name: Docker build (full compose)
+        run: |
+          docker compose build
