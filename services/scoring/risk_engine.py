@@ -93,7 +93,8 @@ def risk_score_wallet(g: nx.DiGraph, wallet: str, illicit: Set[str], cfg: RiskCo
     }
 
 
-def score_top_wallets(g: nx.DiGraph, illicit: Set[str], cfg: RiskConfig, top_n: int = 20) -> pd.DataFrame:
+def score_top_wallets(g: nx.DiGraph, illicit: Set[str], 
+                      cfg: RiskConfig, top_n: int = 20) -> pd.DataFrame:
     rows: List[Dict] = []
     for w in g.nodes:
         r = risk_score_wallet(g, w, illicit, cfg)

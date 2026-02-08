@@ -2,7 +2,7 @@ import os
 from typing import Generator
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 # Local dev default (when you run alembic/python on Windows directly)
 # In Docker Compose, DATABASE_URL is set to host "db" (the service name).

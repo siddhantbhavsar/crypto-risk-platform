@@ -11,8 +11,8 @@ class ScoringRun(Base):
     id = Column(Integer, primary_key=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    tx_source = Column(String, nullable=False)          # e.g. "csv:data/transactions.csv"
-    config_json = Column(JSONB, nullable=False)         # store hop weights, normalization flags, etc.
+    tx_source = Column(String, nullable=False)  # e.g. "csv:data/transactions.csv"
+    config_json = Column(JSONB, nullable=False) # store hop weights, normalization flags, etc.
 
     scores = relationship("RiskScore", back_populates="run")
 
@@ -21,7 +21,13 @@ class RiskScore(Base):
     __tablename__ = "risk_scores"
 
     id = Column(Integer, primary_key=True, index=True)
-    run_id = Column(Integer, ForeignKey("scoring_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id = Column(Integer, 
+                    ForeignKey("scoring_runs.id", 
+                               ondelete="CASCADE"
+                               ), 
+                               nullable=False, 
+                               index=True
+                               )
 
     wallet = Column(String, nullable=False, index=True)
     risk_score = Column(Float, nullable=False)
