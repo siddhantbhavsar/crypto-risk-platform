@@ -214,7 +214,7 @@ docker compose exec api python services/ingestion/kafka_producer.py
 ### Reload graph
 
 ```
-POST http://127.0.0.1:8000/reload-graph
+iwr -Method POST http://127.0.0.1:8000/reload-graph
 ```
 
 ---
@@ -222,7 +222,7 @@ POST http://127.0.0.1:8000/reload-graph
 ### Run scoring
 
 ```
-POST http://127.0.0.1:8000/run-score
+iwr -Method POST http://127.0.0.1:8000/run-score
 ```
 
 ---
