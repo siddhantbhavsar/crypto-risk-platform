@@ -1,0 +1,110 @@
+migrate-1  | .:
+migrate-1  | Dockerfile
+migrate-1  | LICENSE
+migrate-1  | README.md
+migrate-1  | alembic
+migrate-1  | alembic.ini
+migrate-1  | assets
+migrate-1  | dashboard
+migrate-1  | data
+migrate-1  | docker-compose.yml
+migrate-1  | docs
+migrate-1  | pyproject.toml
+migrate-1  | requirements.txt
+migrate-1  | scripts
+migrate-1  | services
+migrate-1  | structure.txt
+migrate-1  | tests
+migrate-1  | 
+migrate-1  | ./alembic:
+migrate-1  | README
+migrate-1  | __pycache__
+migrate-1  | env.py
+migrate-1  | script.py.mako
+migrate-1  | versions
+migrate-1  | 
+migrate-1  | ./alembic/__pycache__:
+migrate-1  | env.cpython-311.pyc
+migrate-1  | 
+migrate-1  | ./alembic/versions:
+migrate-1  | 3704463e3eb0_initial_schema.py
+migrate-1  | __pycache__
+migrate-1  | 
+migrate-1  | ./alembic/versions/__pycache__:
+migrate-1  | 3704463e3eb0_initial_schema.cpython-311.pyc
+migrate-1  | 
+migrate-1  | ./assets:
+migrate-1  | screenshots
+migrate-1  | 
+migrate-1  | ./assets/screenshots:
+migrate-1  | explainability.png
+migrate-1  | ingestion-status.png
+migrate-1  | top-wallets.png
+migrate-1  | 
+migrate-1  | ./dashboard:
+migrate-1  | app.py
+migrate-1  | requirements.txt
+migrate-1  | 
+migrate-1  | ./data:
+migrate-1  | transactions.csv
+migrate-1  | 
+migrate-1  | ./docs:
+migrate-1  | PROJECT_WALKTHROUGH.md
+migrate-1  | 
+migrate-1  | ./scripts:
+migrate-1  | demo.py
+migrate-1  | 
+migrate-1  | ./services:
+migrate-1  | __init__.py
+migrate-1  | __pycache__
+migrate-1  | api
+migrate-1  | ingestion
+migrate-1  | investigation
+migrate-1  | scoring
+migrate-1  | 
+migrate-1  | ./services/__pycache__:
+migrate-1  | __init__.cpython-311.pyc
+migrate-1  | 
+migrate-1  | ./services/api:
+migrate-1  | __init__.py
+migrate-1  | __pycache__
+migrate-1  | crud.py
+migrate-1  | db.py
+migrate-1  | main.py
+migrate-1  | models.py
+migrate-1  | 
+migrate-1  | ./services/api/__pycache__:
+migrate-1  | __init__.cpython-311.pyc
+migrate-1  | crud.cpython-311.pyc
+migrate-1  | db.cpython-311.pyc
+migrate-1  | main.cpython-311.pyc
+migrate-1  | models.cpython-311.pyc
+migrate-1  | 
+migrate-1  | ./services/ingestion:
+migrate-1  | __init__.py
+migrate-1  | __pycache__
+migrate-1  | kafka_consumer.py
+migrate-1  | kafka_producer.py
+migrate-1  | simulator.py
+migrate-1  | 
+migrate-1  | ./services/ingestion/__pycache__:
+migrate-1  | __init__.cpython-311.pyc
+migrate-1  | kafka_consumer.cpython-311.pyc
+migrate-1  | 
+migrate-1  | ./services/investigation:
+migrate-1  | __init__.py
+migrate-1  | 
+migrate-1  | ./services/scoring:
+migrate-1  | __init__.py
+migrate-1  | __pycache__
+migrate-1  | risk_engine.py
+migrate-1  | run_scoring.py
+migrate-1  | 
+migrate-1  | ./services/scoring/__pycache__:
+migrate-1  | __init__.cpython-311.pyc
+migrate-1  | risk_engine.cpython-311.pyc
+migrate-1  | 
+migrate-1  | ./tests:
+migrate-1  | test_risk_engine.py
+migrate-1  | INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+migrate-1  | INFO  [alembic.runtime.migration] Will assume transactional DDL.

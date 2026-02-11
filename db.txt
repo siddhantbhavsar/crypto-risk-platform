@@ -1,0 +1,62 @@
+db-1  | 
+db-1  | PostgreSQL Database directory appears to contain a database; Skipping initialization
+db-1  | 
+db-1  | 2026-02-11 01:33:57.058 UTC [1] LOG:  starting PostgreSQL 16.11 (Debian 16.11-1.pgdg13+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+db-1  | 2026-02-11 01:33:57.059 UTC [1] LOG:  listening on IPv4 address "0.0.0.0", port 5432
+db-1  | 2026-02-11 01:33:57.059 UTC [1] LOG:  listening on IPv6 address "::", port 5432
+db-1  | 2026-02-11 01:33:57.073 UTC [1] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+db-1  | 2026-02-11 01:33:57.097 UTC [28] LOG:  database system was shut down at 2026-02-11 01:33:09 UTC
+db-1  | 2026-02-11 01:33:57.120 UTC [1] LOG:  database system is ready to accept connections
+db-1  | 2026-02-11 01:34:16.459 UTC [57] ERROR:  relation "transactions" does not exist at character 331
+db-1  | 2026-02-11 01:34:16.459 UTC [57] STATEMENT:  SELECT transactions.id AS transactions_id, transactions.tx_id AS transactions_tx_id, transactions.sender AS transactions_sender, transactions.receiver AS transactions_receiver, transactions.amount AS transactions_amount, transactions.timestamp AS transactions_timestamp, transactions.ingested_at AS transactions_ingested_at 
+db-1  | 	FROM transactions
+db-1  | 2026-02-11 01:35:09.691 UTC [57] ERROR:  relation "transactions" does not exist at character 48
+db-1  | 2026-02-11 01:35:09.691 UTC [57] STATEMENT:  SELECT count(transactions.id) AS count_1 
+db-1  | 	FROM transactions
+db-1  | 2026-02-11 01:35:09.704 UTC [57] ERROR:  relation "transactions" does not exist at character 48
+db-1  | 2026-02-11 01:35:09.704 UTC [57] STATEMENT:  SELECT count(transactions.id) AS count_1 
+db-1  | 	FROM transactions
+db-1  | 2026-02-11 01:35:09.717 UTC [57] ERROR:  relation "scoring_runs" does not exist at character 205
+db-1  | 2026-02-11 01:35:09.717 UTC [57] STATEMENT:  SELECT scoring_runs.id AS scoring_runs_id, scoring_runs.created_at AS scoring_runs_created_at, scoring_runs.tx_source AS scoring_runs_tx_source, scoring_runs.config_json AS scoring_runs_config_json 
+db-1  | 	FROM scoring_runs ORDER BY scoring_runs.created_at DESC 
+db-1  | 	 LIMIT 1
+db-1  | 2026-02-11 01:35:49.384 UTC [57] ERROR:  relation "transactions" does not exist at character 48
+db-1  | 2026-02-11 01:35:49.384 UTC [57] STATEMENT:  SELECT count(transactions.id) AS count_1 
+db-1  | 	FROM transactions
+db-1  | 2026-02-11 01:35:49.392 UTC [57] ERROR:  relation "transactions" does not exist at character 48
+db-1  | 2026-02-11 01:35:49.392 UTC [57] STATEMENT:  SELECT count(transactions.id) AS count_1 
+db-1  | 	FROM transactions
+db-1  | 2026-02-11 01:35:49.403 UTC [57] ERROR:  relation "scoring_runs" does not exist at character 205
+db-1  | 2026-02-11 01:35:49.403 UTC [57] STATEMENT:  SELECT scoring_runs.id AS scoring_runs_id, scoring_runs.created_at AS scoring_runs_created_at, scoring_runs.tx_source AS scoring_runs_tx_source, scoring_runs.config_json AS scoring_runs_config_json 
+db-1  | 	FROM scoring_runs ORDER BY scoring_runs.created_at DESC 
+db-1  | 	 LIMIT 1
+db-1  | 2026-02-11 01:36:05.269 UTC [57] ERROR:  relation "transactions" does not exist at character 48
+db-1  | 2026-02-11 01:36:05.269 UTC [57] STATEMENT:  SELECT count(transactions.id) AS count_1 
+db-1  | 	FROM transactions
+db-1  | 2026-02-11 01:36:05.282 UTC [57] ERROR:  relation "transactions" does not exist at character 48
+db-1  | 2026-02-11 01:36:05.282 UTC [57] STATEMENT:  SELECT count(transactions.id) AS count_1 
+db-1  | 	FROM transactions
+db-1  | 2026-02-11 01:36:05.292 UTC [57] ERROR:  relation "scoring_runs" does not exist at character 205
+db-1  | 2026-02-11 01:36:05.292 UTC [57] STATEMENT:  SELECT scoring_runs.id AS scoring_runs_id, scoring_runs.created_at AS scoring_runs_created_at, scoring_runs.tx_source AS scoring_runs_tx_source, scoring_runs.config_json AS scoring_runs_config_json 
+db-1  | 	FROM scoring_runs ORDER BY scoring_runs.created_at DESC 
+db-1  | 	 LIMIT 1
+db-1  | 2026-02-11 01:36:33.972 UTC [57] ERROR:  relation "transactions" does not exist at character 48
+db-1  | 2026-02-11 01:36:33.972 UTC [57] STATEMENT:  SELECT count(transactions.id) AS count_1 
+db-1  | 	FROM transactions
+db-1  | 2026-02-11 01:36:33.984 UTC [57] ERROR:  relation "transactions" does not exist at character 48
+db-1  | 2026-02-11 01:36:33.984 UTC [57] STATEMENT:  SELECT count(transactions.id) AS count_1 
+db-1  | 	FROM transactions
+db-1  | 2026-02-11 01:36:33.996 UTC [57] ERROR:  relation "scoring_runs" does not exist at character 205
+db-1  | 2026-02-11 01:36:33.996 UTC [57] STATEMENT:  SELECT scoring_runs.id AS scoring_runs_id, scoring_runs.created_at AS scoring_runs_created_at, scoring_runs.tx_source AS scoring_runs_tx_source, scoring_runs.config_json AS scoring_runs_config_json 
+db-1  | 	FROM scoring_runs ORDER BY scoring_runs.created_at DESC 
+db-1  | 	 LIMIT 1
+db-1  | 2026-02-11 01:37:21.997 UTC [57] ERROR:  relation "transactions" does not exist at character 48
+db-1  | 2026-02-11 01:37:21.997 UTC [57] STATEMENT:  SELECT count(transactions.id) AS count_1 
+db-1  | 	FROM transactions
+db-1  | 2026-02-11 01:37:22.009 UTC [57] ERROR:  relation "transactions" does not exist at character 48
+db-1  | 2026-02-11 01:37:22.009 UTC [57] STATEMENT:  SELECT count(transactions.id) AS count_1 
+db-1  | 	FROM transactions
+db-1  | 2026-02-11 01:37:22.023 UTC [57] ERROR:  relation "scoring_runs" does not exist at character 205
+db-1  | 2026-02-11 01:37:22.023 UTC [57] STATEMENT:  SELECT scoring_runs.id AS scoring_runs_id, scoring_runs.created_at AS scoring_runs_created_at, scoring_runs.tx_source AS scoring_runs_tx_source, scoring_runs.config_json AS scoring_runs_config_json 
+db-1  | 	FROM scoring_runs ORDER BY scoring_runs.created_at DESC 
+db-1  | 	 LIMIT 1
