@@ -4,6 +4,7 @@ from typing import Any
 import pandas as pd
 import requests
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(
     page_title="Crypto AML Risk Platform",
@@ -262,4 +263,7 @@ with tab_explain:
 # Auto refresh (keep LAST)
 # ----------------------------
 if auto_refresh:
-    st.autorefresh(interval=refresh_seconds * 1000, key="auto_refresh")
+    try:
+        st_autorefresh(interval=refresh_seconds * 1000, key="auto_refresh")
+    except Exception as e:
+        st.warning(f"Auto refresh unavailable: {e}")
