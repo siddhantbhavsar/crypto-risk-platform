@@ -21,6 +21,7 @@ st.divider()
 st.session_state.setdefault("selected_wallet", None)
 st.session_state.setdefault("wallet_graph_payload", None)
 st.session_state.setdefault("wallet_graph_params", None)
+st.session_state.setdefault("graph_presets", {})  # Store named filter presets
 
 DEFAULT_API = "http://api:8000"  # Docker Compose service name
 TIMEOUT = 30
@@ -53,6 +54,38 @@ def safe_call(fn, *args, **kwargs):
 @st.cache_data(ttl=5, show_spinner=False)
 def cached_get(base: str, path: str):
     return _get(base, path)
+
+# ----------------------------
+# Preset & Export Helpers
+# ----------------------------
+
+def save_graph_preset(name: str, preset_data: dict):
+    """Save current filter settings as a preset."""
+    st.session_state.graph_presets[name] = preset_data
+    st.success(f"✅ Preset '{name}' saved!")
+
+def load_graph_preset(name: str) -> dict:
+    """Load a saved preset."""
+    return st.session_state.graph_presets.get(name, {})
+
+def delete_graph_preset(name: str):
+    """Delete a saved preset."""
+    if name in st.session_state.graph_presets:
+        del st.session_state.graph_presets[name]
+        st.success(f"✅ Preset '{name}' deleted!")
+
+def get_preset_names() -> list:
+    """Get list of all saved preset names."""
+    return sorted(list(st.session_state.graph_presets.keys()))
+
+def export_graph_json(payload: dict, filtered_payload: dict = None) -> str:
+    """Export graph data as JSON string."""
+    export_data = {
+        "raw_graph": payload,
+        "filtered_graph": filtered_payload or payload,
+        "export_timestamp": pd.Timestamp.now().isoformat(),
+    }
+    return json.dumps(export_data, indent=2, ensure_ascii=False)
 
 # Sidebar
 st.sidebar.header("Settings")
@@ -403,6 +436,45 @@ with tab_graph:
 
     default_wallet = st.session_state.get("selected_wallet", "W0001") or "W0001"
 
+    # ---- Preset Management
+    st.markdown("### 💾 Filter Presets")
+    preset_cols = st.columns([2, 1, 1])
+    with preset_cols[0]:
+        preset_name = st.text_input("Preset name", placeholder="e.g., 'illicit_only'", key="preset_name_input")
+    with preset_cols[1]:
+        if st.button("Save Preset", use_container_width=True):
+            if preset_name:
+                save_graph_preset(
+                    preset_name,
+                    {
+                        "wallet": st.session_state.get("selected_wallet", "W0001"),
+                        "hops": 2,
+                        "edge_limit": 600,
+                    },
+                )
+            else:
+                st.warning("Enter a preset name first")
+    with preset_cols[2]:
+        preset_names = get_preset_names()
+        if preset_names:
+            selected_preset = st.selectbox("Load preset", preset_names, key="preset_selector")
+            if st.button("Load", use_container_width=True):
+                preset = load_graph_preset(selected_preset)
+                st.session_state["selected_wallet"] = preset.get("wallet", "W0001")
+                st.info(f"✅ Loaded preset '{selected_preset}'")
+                st.rerun()
+
+    if preset_names:
+        with st.expander("Manage Presets"):
+            for pname in preset_names:
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.write(f"📌 {pname}")
+                with col2:
+                    if st.button("🗑️", key=f"del_{pname}"):
+                        delete_graph_preset(pname)
+                        st.rerun()
+
     # ---- Fetch controls (minimal, avoids duplicates)
     with st.form("graph_fetch_form", clear_on_submit=False):
         c1, c2, c3 = st.columns([1.2, 1, 1])
@@ -455,7 +527,11 @@ with tab_graph:
                 default=["center", "illicit", "neighbor"],
             )
         with f4:
-            highlight_wallet = st.text_input("Highlight wallet (optional)", value="").strip()
+            # Auto-highlight selected node from wallet info panel
+            default_highlight = st.session_state.get("highlighted_node", "").strip()
+            highlight_wallet = st.text_input("Highlight wallet (optional)", value=default_highlight).strip()
+            if default_highlight and not highlight_wallet:
+                highlight_wallet = default_highlight
 
         g1, g2, g3 = st.columns(3)
         with g1:
@@ -476,13 +552,46 @@ with tab_graph:
             highlight_wallet=highlight_wallet,
         )
 
+    # ---- Export Controls
+    if payload:
+        # Update payload with selected node highlight for display
+        display_payload = filtered_payload if filtered_payload else payload
+        selected_highlight = st.session_state.get("highlighted_node", "")
+        if selected_highlight and display_payload:
+            display_payload = dict(display_payload)  # Make a copy
+            display_payload["highlight"] = selected_highlight
+        st.markdown("### 📥 Export Graph")
+        exp_col1, exp_col2 = st.columns(2)
+        
+        with exp_col1:
+            # Export raw JSON
+            raw_json = export_graph_json(payload, filtered_payload)
+            st.download_button(
+                label="📄 Export JSON (Raw + Filtered)",
+                data=raw_json,
+                file_name=f"graph_{st.session_state.get('wallet_graph_params', {}).get('wallet', 'unknown')}.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+        
+        with exp_col2:
+            # Export CSV (nodes & edges)
+            var_json = export_graph_json(payload, filtered_payload)
+            st.download_button(
+                label="📊 Export as JSON (Pretty)",
+                data=var_json,
+                file_name=f"graph_data_{st.session_state.get('wallet_graph_params', {}).get('wallet', 'unknown')}_formatted.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+
     left, right = st.columns([3, 1], gap="large")
 
     with left:
         if filtered_payload:
-            render_pyvis_graph(filtered_payload)
+            render_pyvis_graph(display_payload if payload else filtered_payload)
         elif payload:
-            render_pyvis_graph(payload)
+            render_pyvis_graph(display_payload if payload else payload)
         else:
             st.info("Load a wallet graph to visualize it here.")
 
@@ -496,7 +605,28 @@ with tab_graph:
             edges = payload.get("edges", [])
 
             node_by_id = {str(n.get("id")): n for n in nodes if isinstance(n, dict) and n.get("id") is not None}
+            
+            # ---- Node selector for direct click simulation
+            st.markdown("**🔍 Select a Node**")
+            node_ids = sorted(list(node_by_id.keys()))
+            selected_node = st.selectbox(
+                "Click to inspect wallet:",
+                node_ids,
+                index=node_ids.index(center) if center in node_ids else 0,
+                key="node_selector",
+            )
+            
+            # Update highlight in session state for graph rendering
+            st.session_state["highlighted_node"] = selected_node
+            
+            # Use selected node for info display
+            center = selected_node
             center_node = node_by_id.get(center, {})
+            
+            # Show node tag with visual indicator
+            tag = center_node.get("tag", "neighbor")
+            tag_colors = {"center": "🟢 Center", "illicit": "🔴 Illicit", "neighbor": "🔵 Neighbor"}
+            st.info(f"**Node Type:** {tag_colors.get(tag, tag)}")
 
             in_edges = [e for e in edges if str(e.get("target")) == center]
             out_edges = [e for e in edges if str(e.get("source")) == center]

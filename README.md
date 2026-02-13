@@ -48,14 +48,24 @@ subgraph API_and_Scoring
   SCORES[(risk_scores)]
 end
 
+subgraph Dashboard
+  STREAM[Streamlit Dashboard]
+  GRAPH_VIZ[Wallet Graph]
+  EXPLAIN[Explainer]
+end
+
 SIM --> PROD --> K --> CONS --> DB
 DB --> API
 API --> GRAPH --> SCORE
 SCORE --> RUNS
 SCORE --> SCORES
 
+API --> STREAM
+STREAM --> GRAPH_VIZ
+STREAM --> EXPLAIN
+
 API --> STATUS[/ingestion/status/]
-API --> EXPLAIN[/scores/explain/]
+API --> EXPLAIN_API[/scores/explain/]
 ```
 
 
@@ -64,6 +74,21 @@ All services run via Docker Compose.
 ---
 
 ## ✨ Key Features
+
+### 📊 Interactive Streamlit Dashboard
+
+* **Analyst-style UI** for leaderboard, explainability, and ingestion telemetry
+* **Wallet Graph Visualization** with Pyvis network rendering
+* **Filter Presets** — Save and load multi-filter configurations
+* **Export Graph** — Download graph data as JSON for external analysis
+* **Node Interaction** — Click/select nodes to inspect wallet details with real-time metrics
+* **Risk Leaderboard** — View top wallets ranked by risk score
+* **Explainability Viewer** — Hop-by-hop attribution and top contributors
+* **Auto-refresh** — Optional real-time dashboard updates
+
+Access the dashboard at `http://localhost:8501` (Streamlit)
+
+---
 
 ### Streaming ingestion
 
@@ -183,6 +208,14 @@ Start the platform:
 docker compose up -d --build
 ```
 
+### Access Services
+
+- **API** (FastAPI): http://localhost:8000
+- **Dashboard** (Streamlit): http://localhost:8501
+- **Database** (Postgres): localhost:5432
+
+### Ingest Data
+
 Generate transactions:
 
 ```
@@ -192,10 +225,22 @@ docker compose exec api python services/ingestion/simulator.py
 Publish to Kafka:
 
 ```
-docker compose exec api python services/ingestion/kafka_producer.py
+docker compose exec api python -m services.ingestion.kafka_producer
 ```
 
-Run the end-to-end demo:
+### Use Dashboard
+
+1. Open http://localhost:8501
+2. Click **"Reload Graph"** → **"Run Score"** in the sidebar
+3. Explore tabs:
+   - **Leaderboard** — Top-risk wallets ranked by exposure
+   - **Explainability** — Hop-by-hop risk breakdown for any wallet
+   - **Wallet Graph** — Interactive transaction network
+     - Save/load filter presets
+     - Select & highlight nodes
+     - Export graph as JSON
+
+### Run Demo Script
 
 ```
 python scripts/demo.py
@@ -229,7 +274,27 @@ Hot reload is enabled for the API during development.
 
 ---
 
-## 🔍 CI
+## � Dashboard Features (Recent Updates)
+
+### Graph Presets
+- **Save** named filter configurations (direction, hops, tags, thresholds)
+- **Load** presets instantly from dropdown
+- **Manage** presets with delete functionality
+
+### Graph Export
+- Export graph data as **JSON** (raw + filtered)
+- Includes timestamps and full metadata
+- Download directly from browser
+
+### Node Interaction
+- **Select** any node from dropdown to inspect
+- **Auto-highlight** selected node in yellow
+- **Real-time metrics** — in/out edges, transaction amounts, neighbors
+- **Node type badges** — Distinguish center (🟢), illicit (🔴), neighbor (🔵)
+
+---
+
+## �🔍 CI
 
 GitHub Actions runs:
 
