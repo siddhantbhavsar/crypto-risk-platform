@@ -4,6 +4,8 @@ from typing import Any
 import pandas as pd
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
+from pyvis.network import Network
 from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(
@@ -16,9 +18,13 @@ st.title("🛡️ Crypto AML Risk Platform — Dashboard")
 st.caption("Analyst-style UI for leaderboard, explainability, and ingestion telemetry.")
 st.divider()
 
+st.session_state.setdefault("selected_wallet", None)
+st.session_state.setdefault("wallet_graph_payload", None)
+st.session_state.setdefault("wallet_graph_params", None)
 
 DEFAULT_API = "http://api:8000"  # Docker Compose service name
 TIMEOUT = 30
+df = pd.DataFrame()  # always defined to avoid blank-page crashes
 
 
 
@@ -95,8 +101,9 @@ if isinstance(top_for_wallets, list) and top_for_wallets:
 # ----------------------------
 # Tabs
 # ----------------------------
-tab_overview, tab_leaderboard, tab_explain = st.tabs(["Overview", "Leaderboard", "Explainability"])
-
+tab_overview, tab_leaderboard, tab_explain, tab_graph = st.tabs(
+    ["Overview", "Leaderboard", "Explainability", "Wallet Graph"]
+)
 
 # ============================
 # TAB 1: OVERVIEW
@@ -183,17 +190,17 @@ with tab_leaderboard:
             )
         else:
             st.dataframe(df2, use_container_width=True, hide_index=True)
-
-        # Chart AFTER table (cleaner UX)
+        # --- Risk Snapshot chart (after leaderboard) ---
         st.markdown("### Risk Snapshot (Top 20)")
-        if "wallet" in df.columns and "risk_score" in df.columns:
-            chart_df = (
-                df[["wallet", "risk_score"]]
-                .head(20)
-                .sort_values("risk_score", ascending=False)
-                .set_index("wallet")
-            )
+        if not df.empty and {"wallet", "risk_score"}.issubset(df.columns):
+            chart_df = df[["wallet", "risk_score"]].head(20).set_index("wallet")
             st.bar_chart(chart_df)
+        else:
+            st.caption("No risk snapshot yet (run scoring to populate leaderboard).")
+
+
+
+
 
 
 # ============================
@@ -206,6 +213,7 @@ with tab_explain:
         st.info("Run scoring to populate leaderboard first.")
     else:
         wallet = st.selectbox("Select wallet", wallets, index=0)
+        st.session_state["selected_wallet"] = wallet
         max_hops = st.selectbox("Max hops", [1, 2, 3], index=1)
         per_hop_limit = st.slider("Per-hop sample", 5, 50, 10, key="per_hop_limit")
         total_limit = st.slider("Total contributors limit", 10, 200, 25, key="total_limit")
@@ -259,11 +267,291 @@ with tab_explain:
                 st.code(pretty(explain), language="json")
 
 
+# ============================
+# TAB 4: WALLET GRAPH (REFINED)
+# ============================
+
+def render_pyvis_graph(payload: dict):
+    highlight = (payload.get("highlight") or "").strip()
+    nodes = payload.get("nodes", [])
+    edges = payload.get("edges", [])
+
+    net = Network(
+        height="650px",
+        width="100%",
+        directed=True,
+        bgcolor="#0E1117",
+        font_color="#E6EDF3",
+        cdn_resources="in_line",  # avoids blank embeds in Codespaces sometimes
+    )
+    net.barnes_hut(gravity=-20000, central_gravity=0.15, spring_length=160, spring_strength=0.04, damping=0.09)
+
+    for n in nodes:
+        nid = str(n.get("id"))
+        tag = n.get("tag", "neighbor")
+        hop = n.get("hop", None)
+        rs = n.get("risk_score", None)
+
+        # base styling by tag
+        if tag == "center":
+            color, size = "#00C853", 30
+        elif tag == "illicit":
+            color, size = "#FF5252", 22
+        else:
+            color, size = "#64B5F6", 16
+
+        # apply highlight LAST so it wins
+        if highlight and nid == highlight:
+            color, size = "#FFD54F", 36  # highlight gold
+
+        title = (
+            f"wallet={nid}<br>"
+            f"hop={hop}<br>"
+            f"risk_score={rs}<br>"
+            f"in={n.get('in_degree')} out={n.get('out_degree')}"
+        )
+        net.add_node(nid, label=nid, title=title, color=color, size=size)
+
+    for e in edges:
+        src = str(e.get("source"))
+        dst = str(e.get("target"))
+        txc = int(e.get("tx_count", 1))
+        amt = float(e.get("total_amount", 0.0))
+        width = 1 + min(8, txc)
+        title = f"tx_count={txc}<br>total_amount={amt:.2f}"
+        net.add_edge(src, dst, title=title, width=width)
+
+    html = net.generate_html(notebook=False)
+    components.html(html, height=700, scrolling=True)
+
+
+def apply_graph_filters(payload: dict, *, direction: str, max_hop_show: int, allowed_tags: list[str],
+                        min_tx_count: int, min_total_amount: float, top_k_edges: int, highlight_wallet: str) -> dict:
+    center = str(payload.get("center")) if payload.get("center") is not None else None
+
+    # normalize nodes/edges to str IDs
+    nodes_in = []
+    for n in payload.get("nodes", []):
+        if isinstance(n, dict) and n.get("id") is not None:
+            nn = dict(n)
+            nn["id"] = str(nn["id"])
+            nodes_in.append(nn)
+
+    edges_in = []
+    for e in payload.get("edges", []):
+        if isinstance(e, dict) and e.get("source") is not None and e.get("target") is not None:
+            ee = dict(e)
+            ee["source"] = str(ee["source"])
+            ee["target"] = str(ee["target"])
+            edges_in.append(ee)
+
+    # 1) nodes by hop + tag
+    nodes_kept = [
+        n for n in nodes_in
+        if (n.get("tag", "neighbor") in allowed_tags)
+        and (n.get("hop") is None or int(n.get("hop", 0)) <= int(max_hop_show))
+    ]
+    node_ids = {n["id"] for n in nodes_kept}
+
+    # 2) edges by direction + thresholds + endpoint presence
+    def edge_passes_dir(e):
+        if not center:
+            return True
+        if direction == "outgoing":
+            return e["source"] == center
+        if direction == "incoming":
+            return e["target"] == center
+        return True
+
+    edges_kept = []
+    for e in edges_in:
+        txc = int(e.get("tx_count", 1))
+        amt = float(e.get("total_amount", 0.0))
+
+        if not edge_passes_dir(e):
+            continue
+        if txc < int(min_tx_count):
+            continue
+        if amt < float(min_total_amount):
+            continue
+        if e["source"] not in node_ids or e["target"] not in node_ids:
+            continue
+        edges_kept.append(e)
+
+    # 3) optional top-K edges
+    if int(top_k_edges) > 0 and edges_kept:
+        edges_kept = sorted(edges_kept, key=lambda x: float(x.get("total_amount", 0.0)), reverse=True)[: int(top_k_edges)]
+        connected = set()
+        for e in edges_kept:
+            connected.add(e["source"])
+            connected.add(e["target"])
+        if center:
+            connected.add(center)
+        nodes_kept = [n for n in nodes_kept if n["id"] in connected]
+
+    return {
+        "center": center,
+        "nodes": nodes_kept,
+        "edges": edges_kept,
+        "highlight": highlight_wallet.strip(),
+    }
+
+
+with tab_graph:
+    st.subheader("Wallet Transaction Network")
+    st.caption("Fetch a wallet subgraph from API, then refine it locally with filters.")
+
+    default_wallet = st.session_state.get("selected_wallet", "W0001") or "W0001"
+
+    # ---- Fetch controls (minimal, avoids duplicates)
+    with st.form("graph_fetch_form", clear_on_submit=False):
+        c1, c2, c3 = st.columns([1.2, 1, 1])
+        with c1:
+            wallet = st.text_input("Wallet", value=default_wallet)
+        with c2:
+            hops = st.slider("Hops (API)", 1, 4, 2)
+        with c3:
+            edge_limit = st.slider("Max edges (API)", 50, 3000, 600, step=50)
+
+        b_fetch, b_clear = st.columns(2)
+        load_clicked = b_fetch.form_submit_button("Load Graph", use_container_width=True)
+        clear_clicked = b_clear.form_submit_button("Clear Graph", use_container_width=True)
+
+    if clear_clicked:
+        st.session_state["wallet_graph_payload"] = None
+        st.session_state["wallet_graph_params"] = None
+        st.info("Cleared graph.")
+
+    if load_clicked:
+        payload, err = safe_call(
+            _get,
+            api_base,
+            f"/graph/wallet/{wallet}?hops={hops}&edge_limit={edge_limit}",
+        )
+        if err:
+            st.error(err)
+        else:
+            st.session_state["wallet_graph_payload"] = payload
+            st.session_state["wallet_graph_params"] = {"wallet": wallet, "hops": hops, "edge_limit": edge_limit}
+            st.success(f"Loaded {len(payload.get('nodes', []))} nodes and {len(payload.get('edges', []))} edges.")
+
+    payload = st.session_state.get("wallet_graph_payload")
+
+    # ---- View filters (single place for filtering)
+    filtered_payload = None
+    if payload:
+        st.markdown("### Graph Filters (View)")
+
+        f1, f2, f3, f4 = st.columns([1.2, 1.2, 1.6, 1.4])
+        with f1:
+            direction = st.selectbox("Direction", ["both", "outgoing", "incoming"], index=0)
+        with f2:
+            # default to API hops so it doesn’t feel duplicated
+            max_hop_show = st.slider("Show hops ≤", 0, 4, int(st.session_state["wallet_graph_params"]["hops"]))
+        with f3:
+            allowed_tags = st.multiselect(
+                "Include tags",
+                ["center", "illicit", "neighbor"],
+                default=["center", "illicit", "neighbor"],
+            )
+        with f4:
+            highlight_wallet = st.text_input("Highlight wallet (optional)", value="").strip()
+
+        g1, g2, g3 = st.columns(3)
+        with g1:
+            min_tx_count = st.number_input("Min tx_count", min_value=0, value=0, step=1)
+        with g2:
+            min_total_amount = st.number_input("Min total_amount", min_value=0.0, value=0.0, step=10.0)
+        with g3:
+            top_k_edges = st.number_input("Top-K edges by amount (0=off)", min_value=0, value=0, step=50)
+
+        filtered_payload = apply_graph_filters(
+            payload,
+            direction=direction,
+            max_hop_show=max_hop_show,
+            allowed_tags=allowed_tags,
+            min_tx_count=min_tx_count,
+            min_total_amount=min_total_amount,
+            top_k_edges=top_k_edges,
+            highlight_wallet=highlight_wallet,
+        )
+
+    left, right = st.columns([3, 1], gap="large")
+
+    with left:
+        if filtered_payload:
+            render_pyvis_graph(filtered_payload)
+        elif payload:
+            render_pyvis_graph(payload)
+        else:
+            st.info("Load a wallet graph to visualize it here.")
+
+    with right:
+        st.subheader("Wallet Info")
+        if not payload:
+            st.caption("No graph loaded yet.")
+        else:
+            center = str(payload.get("center")) if payload.get("center") is not None else None
+            nodes = payload.get("nodes", [])
+            edges = payload.get("edges", [])
+
+            node_by_id = {str(n.get("id")): n for n in nodes if isinstance(n, dict) and n.get("id") is not None}
+            center_node = node_by_id.get(center, {})
+
+            in_edges = [e for e in edges if str(e.get("target")) == center]
+            out_edges = [e for e in edges if str(e.get("source")) == center]
+
+            def _sum_amount(es):
+                s = 0.0
+                for e in es:
+                    try:
+                        s += float(e.get("total_amount", 0.0))
+                    except Exception:
+                        pass
+                return s
+
+            total_in = _sum_amount(in_edges)
+            total_out = _sum_amount(out_edges)
+
+            neighbors = set()
+            for e in edges:
+                if str(e.get("source")) == center:
+                    neighbors.add(str(e.get("target")))
+                if str(e.get("target")) == center:
+                    neighbors.add(str(e.get("source")))
+
+            st.metric("Wallet", center or "n/a")
+            a, b = st.columns(2)
+            a.metric("Nodes", len(nodes))
+            b.metric("Edges", len(edges))
+
+            a, b = st.columns(2)
+            a.metric("Neighbors", len([n for n in neighbors if n]))
+            b.metric("Tag", center_node.get("tag", "n/a"))
+
+            a, b = st.columns(2)
+            a.metric("In edges", len(in_edges))
+            b.metric("Out edges", len(out_edges))
+
+            st.metric("Total In Amount", f"{total_in:,.2f}")
+            st.metric("Total Out Amount", f"{total_out:,.2f}")
+
+            if st.button("Use in Explainability", use_container_width=True):
+                st.session_state["selected_wallet"] = center
+
+            with st.expander("Raw node"):
+                st.json(center_node)
+
 # ----------------------------
 # Auto refresh (keep LAST)
 # ----------------------------
-if auto_refresh:
-    try:
-        st_autorefresh(interval=refresh_seconds * 1000, key="auto_refresh")
-    except Exception as e:
-        st.warning(f"Auto refresh unavailable: {e}")
+
+pause_refresh_when_graph_loaded = st.sidebar.checkbox(
+    "Pause auto-refresh when graph is loaded",
+    value=True,
+)
+
+graph_loaded = bool(st.session_state.get("wallet_graph_payload"))
+
+if auto_refresh and not (pause_refresh_when_graph_loaded and graph_loaded):
+    st_autorefresh(interval=refresh_seconds * 1000, key="auto_refresh")
