@@ -19,6 +19,7 @@ class RiskConfig:
 def build_tx_graph(txs: pd.DataFrame) -> nx.DiGraph:
     """
     Directed graph: src -> dst for each transaction.
+    Aggregates transaction counts and amounts per edge.
     """
     required = {"src", "dst"}
     missing = required - set(txs.columns)
@@ -26,8 +27,25 @@ def build_tx_graph(txs: pd.DataFrame) -> nx.DiGraph:
         raise ValueError(f"Missing columns: {missing}")
 
     g = nx.DiGraph()
-    for row in txs[["src", "dst"]].itertuples(index=False):
-        g.add_edge(row.src, row.dst)
+    
+    # Build edge dictionary with aggregated amounts
+    edge_data = {}
+    for row in txs.itertuples(index=False):
+        src = row.src
+        dst = row.dst
+        edge_key = (src, dst)
+        amount = float(getattr(row, 'amount', 0.0)) if hasattr(row, 'amount') else 0.0
+        
+        if edge_key not in edge_data:
+            edge_data[edge_key] = {"tx_count": 0, "amount": 0.0}
+        
+        edge_data[edge_key]["tx_count"] += 1
+        edge_data[edge_key]["amount"] += amount
+    
+    # Add edges with aggregated data
+    for (src, dst), data in edge_data.items():
+        g.add_edge(src, dst, tx_count=data["tx_count"], amount=data["amount"])
+    
     return g
 
 

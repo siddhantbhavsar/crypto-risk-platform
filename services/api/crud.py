@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from sqlalchemy import desc, func
 from sqlalchemy.dialects.postgresql import insert
@@ -157,3 +157,46 @@ def count_ingested_since(db: Session, minutes: int = 5) -> int:
 
 def get_run_by_id(db: Session, run_id: int) -> Optional[ScoringRun]:
     return db.query(ScoringRun).filter(ScoringRun.id == run_id).first()
+
+
+
+
+
+def aggregate_edges_for_nodes(
+    db,
+    nodes: Set[str],
+    edge_limit: int = 500,
+    min_amount: float = 0.0,
+) -> List[Dict[str, Any]]:
+    """
+    Aggregate transactions between wallets inside `nodes`.
+    Returns edges with tx_count + total_amount.
+    """
+    if not nodes:
+        return []
+
+    q = (
+        db.query(
+            Transaction.sender.label("source"),
+            Transaction.receiver.label("target"),
+            func.count(Transaction.id).label("tx_count"),
+            func.coalesce(func.sum(Transaction.amount), 0.0).label("total_amount"),
+        )
+        .filter(Transaction.sender.in_(nodes))
+        .filter(Transaction.receiver.in_(nodes))
+        .filter(Transaction.amount >= float(min_amount))
+        .group_by(Transaction.sender, Transaction.receiver)
+        .order_by(func.count(Transaction.id).desc(), func.sum(Transaction.amount).desc())
+        .limit(int(edge_limit))
+    )
+
+    rows = q.all()
+    return [
+        {
+            "source": r.source,
+            "target": r.target,
+            "tx_count": int(r.tx_count or 0),
+            "total_amount": float(r.total_amount or 0.0),
+        }
+        for r in rows
+    ]

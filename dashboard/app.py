@@ -18,7 +18,8 @@ st.title("🛡️ Crypto AML Risk Platform — Dashboard")
 st.caption("Analyst-style UI for leaderboard, explainability, and ingestion telemetry.")
 st.divider()
 
-st.session_state.setdefault("selected_wallet", None)
+st.session_state.setdefault("selected_wallet", None)  # For Explainability tab
+st.session_state.setdefault("graph_wallet", "0xd8da6bf26964af9d7eed9e03e53415d37aa96045")  # For Wallet Graph tab (Vitalik's)
 st.session_state.setdefault("wallet_graph_payload", None)
 st.session_state.setdefault("wallet_graph_params", None)
 st.session_state.setdefault("graph_presets", {})  # Store named filter presets
@@ -174,7 +175,7 @@ with tab_overview:
         if err:
             st.error(err)
         else:
-            metrics = status.get("metrics", {}) if isinstance(status, dict) else {}
+            metrics = status.get("metrics") or {} if isinstance(status, dict) else {}
             tx_count = status.get("tx_count")
             seconds_since = metrics.get("seconds_since_last_processed")
             total_inserted = metrics.get("total_inserted")
@@ -226,8 +227,24 @@ with tab_leaderboard:
         # --- Risk Snapshot chart (after leaderboard) ---
         st.markdown("### Risk Snapshot (Top 20)")
         if not df.empty and {"wallet", "risk_score"}.issubset(df.columns):
-            chart_df = df[["wallet", "risk_score"]].head(20).set_index("wallet")
-            st.bar_chart(chart_df)
+            try:
+                chart_df = df[["wallet", "risk_score"]].head(20).copy()
+                # Use short wallet labels for better chart visualization
+                chart_df["wallet_short"] = chart_df["wallet"].apply(lambda x: f"{x[:6]}...{x[-4:]}")
+                chart_df = chart_df[["wallet_short", "risk_score"]].set_index("wallet_short")
+                
+                # Ensure no NaN or inf values
+                chart_df = chart_df.dropna()
+                chart_df = chart_df[~chart_df.isin([float('inf'), float('-inf')]).any(axis=1)]
+                
+                if not chart_df.empty:
+                    st.bar_chart(chart_df)
+                else:
+                    st.warning("No valid risk scores to display.")
+            except Exception as chart_err:
+                st.error(f"Chart rendering error: {chart_err}")
+                # Fallback to table
+                st.dataframe(df[["wallet", "risk_score"]].head(20))
         else:
             st.caption("No risk snapshot yet (run scoring to populate leaderboard).")
 
@@ -350,16 +367,28 @@ def render_pyvis_graph(payload: dict):
         dst = str(e.get("target"))
         txc = int(e.get("tx_count", 1))
         amt = float(e.get("total_amount", 0.0))
-        width = 1 + min(8, txc)
+        width = 0.5 + min(2.5, txc * 0.3)  # Reduced thickness: 0.5-3.0 instead of 1-9
         title = f"tx_count={txc}<br>total_amount={amt:.2f}"
         net.add_edge(src, dst, title=title, width=width)
 
     html = net.generate_html(notebook=False)
+    
+    # Remove white border/padding around graph by injecting CSS
+    html = html.replace(
+        "<body>",
+        "<body style='margin: 0; padding: 0; background: #0E1117;'>"
+    )
+    html = html.replace(
+        "<style type=\"text/css\">",
+        "<style type=\"text/css\">\n        html, body { margin: 0; padding: 0; background: #0E1117; }\n        #mynetwork { background: #0E1117 !important; }\n        "
+    )
+    
     components.html(html, height=700, scrolling=True)
 
 
 def apply_graph_filters(payload: dict, *, direction: str, max_hop_show: int, allowed_tags: list[str],
-                        min_tx_count: int, min_total_amount: float, top_k_edges: int, highlight_wallet: str) -> dict:
+                        min_tx_count: int, min_total_amount: float, top_k_edges: int, highlight_wallet: str,
+                        show_only_connected: bool = False) -> dict:
     center = str(payload.get("center")) if payload.get("center") is not None else None
 
     # normalize nodes/edges to str IDs
@@ -422,6 +451,17 @@ def apply_graph_filters(payload: dict, *, direction: str, max_hop_show: int, all
             connected.add(center)
         nodes_kept = [n for n in nodes_kept if n["id"] in connected]
 
+    # 4) optional filter: show only nodes with edges
+    if show_only_connected:
+        connected_nodes = set()
+        for e in edges_kept:
+            connected_nodes.add(e["source"])
+            connected_nodes.add(e["target"])
+        # Always keep center node even if isolated
+        if center:
+            connected_nodes.add(center)
+        nodes_kept = [n for n in nodes_kept if n["id"] in connected_nodes]
+
     return {
         "center": center,
         "nodes": nodes_kept,
@@ -434,7 +474,9 @@ with tab_graph:
     st.subheader("Wallet Transaction Network")
     st.caption("Fetch a wallet subgraph from API, then refine it locally with filters.")
 
-    default_wallet = st.session_state.get("selected_wallet", "W0001") or "W0001"
+    # Use Vitalik's wallet as default for this tab only
+    vitalik_wallet = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045"
+    default_wallet = st.session_state.get("graph_wallet", vitalik_wallet)
 
     # ---- Preset Management
     st.markdown("### 💾 Filter Presets")
@@ -477,13 +519,23 @@ with tab_graph:
 
     # ---- Fetch controls (minimal, avoids duplicates)
     with st.form("graph_fetch_form", clear_on_submit=False):
-        c1, c2, c3 = st.columns([1.2, 1, 1])
+        c1, c2, c3, c4 = st.columns([1.2, 0.9, 0.9, 0.9])
         with c1:
             wallet = st.text_input("Wallet", value=default_wallet)
         with c2:
             hops = st.slider("Hops (API)", 1, 4, 2)
         with c3:
-            edge_limit = st.slider("Max edges (API)", 50, 3000, 600, step=50)
+            max_nodes = st.slider("Max nodes", 10, 500, 100)
+        with c4:
+            min_amount = st.number_input("Min amount", min_value=0.0, value=0.0, step=10.0)
+        
+        c5 = st.columns(1)[0]
+        with c5:
+            edge_limit = st.slider("Max edges", 50, 600, 600, step=50)
+        
+        c6 = st.columns(1)[0]
+        with c6:
+            show_connected_only = st.checkbox("🔗 Show only nodes with edges", value=False, help="Filter to display only connected wallets, hiding isolated nodes")
 
         b_fetch, b_clear = st.columns(2)
         load_clicked = b_fetch.form_submit_button("Load Graph", use_container_width=True)
@@ -498,13 +550,14 @@ with tab_graph:
         payload, err = safe_call(
             _get,
             api_base,
-            f"/graph/wallet/{wallet}?hops={hops}&edge_limit={edge_limit}",
+            f"/graph/wallet/{wallet}?hops={hops}&edge_limit={edge_limit}&node_limit={max_nodes}&min_amount={min_amount}&only_connected={show_connected_only}",
         )
         if err:
             st.error(err)
         else:
             st.session_state["wallet_graph_payload"] = payload
-            st.session_state["wallet_graph_params"] = {"wallet": wallet, "hops": hops, "edge_limit": edge_limit}
+            st.session_state["graph_wallet"] = wallet  # Remember this wallet for next reload
+            st.session_state["wallet_graph_params"] = {"wallet": wallet, "hops": hops, "edge_limit": edge_limit, "node_limit": max_nodes}
             st.success(f"Loaded {len(payload.get('nodes', []))} nodes and {len(payload.get('edges', []))} edges.")
 
     payload = st.session_state.get("wallet_graph_payload")
@@ -550,6 +603,7 @@ with tab_graph:
             min_total_amount=min_total_amount,
             top_k_edges=top_k_edges,
             highlight_wallet=highlight_wallet,
+            show_only_connected=False,  # Now handled at API level during fetch
         )
 
     # ---- Export Controls
@@ -601,12 +655,15 @@ with tab_graph:
             st.caption("No graph loaded yet.")
         else:
             center = str(payload.get("center")) if payload.get("center") is not None else None
-            nodes = payload.get("nodes", [])
-            edges = payload.get("edges", [])
+            
+            # Use filtered nodes if available, otherwise use raw payload nodes
+            display_payload = filtered_payload if filtered_payload else payload
+            nodes = display_payload.get("nodes", [])
+            edges = display_payload.get("edges", [])
 
             node_by_id = {str(n.get("id")): n for n in nodes if isinstance(n, dict) and n.get("id") is not None}
             
-            # ---- Node selector for direct click simulation
+            # ---- Node selector for direct click simulation (only shows filtered nodes)
             st.markdown("**🔍 Select a Node**")
             node_ids = sorted(list(node_by_id.keys()))
             selected_node = st.selectbox(

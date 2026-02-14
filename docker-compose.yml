@@ -10,11 +10,14 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    env_file:
+      - .env
     environment:
+      ETHERSCAN_API_KEY: ${ETHERSCAN_API_KEY}
       DATABASE_URL: postgresql+psycopg2://risk:risk@db:5432/riskdb
       KAFKA_TOPIC_TRANSACTIONS: transactions
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      TX_SOURCE: db
+      TX_SOURCE: csv
       ILLICIT_SEED: "123"
       PYTHONPATH: "/app"
 
@@ -123,17 +126,26 @@ services:
     restart: "no"
 
   dashboard:
-    image: python:3.11-slim
-    working_dir: /app
-    volumes:
-      - .:/app
+    build: .
     depends_on:
       - api
     ports:
       - "8501:8501"
-    command: >
-      bash -lc "pip install --no-cache-dir -r dashboard/requirements.txt
-      && streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0"
+    environment:
+      # Streamlit will call the API using the docker network hostname "api"
+      API_BASE_URL: http://api:8000
+    volumes:
+      - .:/app
+      - ./data:/app/data
+    working_dir: /app
+    command:
+      [
+        "streamlit", "run", "dashboard/app.py",
+        "--server.address=0.0.0.0",
+        "--server.port=8501",
+        "--server.headless=true"
+      ]
+    restart: unless-stopped
 
 volumes:
   pgdata:
