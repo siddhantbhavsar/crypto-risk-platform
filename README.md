@@ -32,8 +32,8 @@ flowchart LR
     DB[(PostgreSQL)]
   end
 
-  subgraph API
-    API[FastAPI]
+  subgraph Backend
+    REST[FastAPI Server]
     GRAPH[Graph Engine]
     SCORE[Risk Scoring]
   end
@@ -43,21 +43,27 @@ flowchart LR
     VIZ[Graph Visualizer]
   end
 
-  ETH --> API
-  PROD --> K --> CONS --> DB
-  DB --> API
-  API --> GRAPH --> SCORE
-  API --> DASH --> VIZ
+  ETH -->|Fetch Txs| PROD
+  PROD -->|Publish| K
+  K -->|Consume| CONS
+  CONS -->|Store| DB
+  DB -->|Load Graph| REST
+  REST --> GRAPH
+  GRAPH --> SCORE
+  REST -->|API Calls| DASH
+  DASH --> VIZ
 ```
 
 ### Components
 
-- **Etherscan Fetcher** - Pulls live Ethereum transactions
-- **Kafka Pipeline** - Streaming ingestion (producer → consumer)
-- **PostgreSQL** - Persistent storage for transactions and scores
+- **Etherscan Fetcher** - Pulls live Ethereum transactions via API
+- **Kafka Producer** - Publishes transactions to Kafka topic
+- **Kafka Consumer** - Consumes transactions and stores in PostgreSQL
+- **PostgreSQL** - Persistent storage for transactions, scores, and metadata
+- **FastAPI Server** - REST API for scoring, explainability, and graph queries
 - **Risk Engine** - Multi-hop graph algorithm with degree normalization
-- **FastAPI** - REST API for scoring, explainability, and graph queries
 - **Streamlit Dashboard** - Analyst UI with leaderboard, explainability, and network graph
+- **Graph Visualizer** - Interactive transaction network visualization
 
 ---
 
