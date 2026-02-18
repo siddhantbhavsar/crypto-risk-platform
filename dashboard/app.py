@@ -1,4 +1,5 @@
 import json
+import os
 from typing import Any
 
 import pandas as pd
@@ -24,7 +25,8 @@ st.session_state.setdefault("wallet_graph_payload", None)
 st.session_state.setdefault("wallet_graph_params", None)
 st.session_state.setdefault("graph_presets", {})  # Store named filter presets
 
-DEFAULT_API = "http://api:8000"  # Docker Compose service name
+# Default API URL - browser needs localhost, not Docker service name
+DEFAULT_API = os.getenv("DASHBOARD_API_URL", "http://localhost:8000")
 TIMEOUT = 180  # Increased for large scoring operations
 
 
