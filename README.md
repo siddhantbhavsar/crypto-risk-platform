@@ -212,17 +212,29 @@ For any wallet, the platform provides:
 
 ## 📸 Screenshots
 
-### Top Wallets Leaderboard
-![Top Wallets Dashboard](assets/screenshots/top-wallets.png)
-Displays the highest risk wallets with scoring metrics and sortable columns.
+### Dashboard Overview
+![Dashboard Overview](assets/screenshots/dashboard-overview.png)
+Health status, readiness checks, and real-time Kafka ingestion metrics showing transaction processing.
+
+### Leaderboard - Top Risk Wallets
+![Leaderboard Dashboard](assets/screenshots/dashboard-leaderboard.png)
+Sortable table displaying highest risk wallets with scores, degrees, and timestamps. Includes risk distribution visualization.
+
+### Wallet Graph Visualization
+![Wallet Graph Network](assets/screenshots/dashboard-graph.png)
+Interactive transaction network with customizable filters (hops, node types, amounts, edge limits). Supports graph presets and export.
 
 ### Explainability Analysis
 ![Explainability Breakdown](assets/screenshots/explainability.png)
 Hop-by-hop risk breakdown showing exactly which illicit wallets contribute to a wallet's score.
 
-### Ingestion Status
+### Ingestion Telemetry (Legacy)
 ![Ingestion Status](assets/screenshots/ingestion-status.png)
 Real-time ingestion metrics and graph statistics during data processing.
+
+### Top Wallets Table (Legacy)
+![Top Wallets Dashboard](assets/screenshots/top-wallets.png)
+Basic view of highest risk wallets with scoring metrics.
 
 ---
 

@@ -3,8 +3,8 @@
 # ============================================================================
 # CRYPTO AML RISK PLATFORM - COMPLETE DEMO
 # ============================================================================
-# Full demonstration including Kafka streaming ingestion, scoring, and visualization
-# Pipeline: Generate Data → Kafka → Consumer → PostgreSQL → Graph → Scoring
+# Full demonstration including live Ethereum data ingestion via Etherscan API
+# Pipeline: Fetch Real Data → Kafka → Consumer → PostgreSQL → Graph → Scoring
 # Works in both local and GitHub Codespaces environments
 # ============================================================================
 
@@ -31,8 +31,8 @@ fi
 echo -e "${BLUE}"
 cat << 'EOF'
 ╔═══════════════════════════════════════════════════════════╗
-║     CRYPTO AML RISK PLATFORM - COMPLETE DEMO             ║
-║     Full Pipeline: Kafka → DB → Graph → Score            ║
+║     CRYPTO AML RISK PLATFORM - COMPLETE DEMO              ║
+║     Live Ethereum Data → Kafka → DB → Graph → Score       ║
 ╚═══════════════════════════════════════════════════════════╝
 EOF
 echo -e "${NC}"
@@ -79,22 +79,54 @@ docker compose ps db kafka zookeeper
 echo ""
 
 # ============================================================================
-# STEP 3: GENERATE SAMPLE DATA
+# STEP 3: FETCH LIVE ETHEREUM DATA
 # ============================================================================
-section "STEP 3: Generating Sample Transaction Data"
+section "STEP 3: Fetching Live Ethereum Transaction Data"
 
-# Load API key from .env (for future use with live data)
+# Load API key from .env
 if [ -f .env ]; then
     export $(grep -v '^#' .env | xargs)
 fi
 
-echo "🎲 Generating synthetic transaction data..."
-docker compose run --rm -T api python -c "
+API_KEY="${ETHERSCAN_API_KEY:-YourApiKeyToken}"
+
+# Well-known Ethereum wallets (including Vitalik's)
+WALLETS=(
+    "0xd8da6bf26964af9d7eed9e03e53415d37aa96045"  # Vitalik Buterin
+    "0x28c6c06298d514db089934071355e5743bf21d60"  # Binance Hot Wallet
+    "0x21a31ee1afc51d94c2efccaa2092ad1028285549"  # Binance Cold Wallet
+    "0x47ac0fb4f2d84898e4d9e7b4dab3c24507a6d503"  # Binance Wallet
+    "0xbe0eb53f46cd790cd13851d5eff43d12404d33e8"  # Binance Wallet
+    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"  # WETH Contract
+    "0x3f5ce5fbfe3e9af3971dd833d26ba9b5c936f0be"  # Binance Exchange
+)
+
+echo -e "📊 Fetching transactions from ${#WALLETS[@]} Ethereum wallets..."
+echo -e "🔑 Using API key: ${API_KEY:0:10}..."
+echo ""
+
+echo "🚀 Starting API container for data fetching..."
+docker compose up -d api
+sleep 10
+
+echo "📥 Fetching live data from Etherscan..."
+docker compose exec -T api python -m services.blockchain.fetch_ethereum \
+    --wallets "${WALLETS[@]}" \
+    --api-key "$API_KEY" \
+    --output data/transactions.csv \
+    --start-block 0 \
+    --end-block 99999999 || echo "⚠️  Etherscan fetch completed (may have rate limit warnings)"
+
+# Check if data was fetched successfully
+if [ ! -f data/transactions.csv ] || [ ! -s data/transactions.csv ]; then
+    echo -e "${RED}❌ No data fetched. Generating fallback sample data...${NC}"
+    docker compose exec -T api python -c "
 from services.ingestion.simulator import simulate_transactions, write_transactions_csv
 df = simulate_transactions(n_wallets=300, n_txs=2500, start_days_ago=60)
 write_transactions_csv(df, '/app/data/transactions.csv')
-print(f'✅ Generated {len(df)} sample transactions')
+print('✅ Generated fallback data')
 "
+fi
 
 # Count transactions
 TX_COUNT=$(tail -n +2 data/transactions.csv 2>/dev/null | wc -l || echo "0")
@@ -119,13 +151,14 @@ echo "📤 Publishing transactions to Kafka..."
 docker compose exec -T consumer python -m services.ingestion.kafka_producer
 
 echo ""
-echo "⏳ Waiting for consumer to process transactions (10 seconds)..."
-sleep 10
+echo "⏳ Waiting for consumer to process transactions (30 seconds)..."
+sleep 30
 
 echo ""
 echo "📊 Checking ingestion progress..."
-INGESTED=$(docker compose exec -T db psql -U postgres -d crypto_risk -t -c "SELECT COUNT(*) FROM transactions;" 2>/dev/null || echo "0")
-echo -e "${GREEN}✅ Ingested $INGESTED transactions into PostgreSQL${NC}"
+INGESTED=$(docker compose exec -T db psql -U risk -d riskdb -t -c "SELECT COUNT(*) FROM transactions;" 2>/dev/null)
+INGESTED_CLEAN=$(echo "$INGESTED" | tr -d ' ')
+echo -e "${GREEN}✅ Ingested $INGESTED_CLEAN transactions into PostgreSQL${NC}"
 
 # ============================================================================
 # STEP 5: START API & DASHBOARD (WITH DATABASE MODE)

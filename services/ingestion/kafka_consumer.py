@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from kafka import KafkaConsumer
@@ -41,8 +42,25 @@ def normalize_record(r: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     except (TypeError, ValueError):
         amount = 0.0
 
-    # timestamp is optional; db default may apply
-    ts = r.get("timestamp") or None
+    # timestamp: handle Unix timestamps (int/str), ISO strings, or datetime objects
+    ts_raw = r.get("timestamp")
+    ts = None
+    if ts_raw:
+        try:
+            # Try parsing as Unix timestamp (int or numeric string)
+            ts_int = int(float(ts_raw))
+            ts = datetime.utcfromtimestamp(ts_int)
+        except (ValueError, TypeError, OSError):
+            # Might already be an ISO string or datetime object
+            try:
+                if isinstance(ts_raw, str):
+                    # Try parsing ISO format
+                    ts = datetime.fromisoformat(ts_raw.replace('Z', '+00:00'))
+                elif isinstance(ts_raw, datetime):
+                    ts = ts_raw
+            except (ValueError, TypeError):
+                # If all parsing fails, leave as None (DB will use default)
+                ts = None
 
     return {
         "tx_id": tx_id,

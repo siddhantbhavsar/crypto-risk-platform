@@ -25,8 +25,8 @@ st.session_state.setdefault("wallet_graph_payload", None)
 st.session_state.setdefault("wallet_graph_params", None)
 st.session_state.setdefault("graph_presets", {})  # Store named filter presets
 
-# Default API URL - browser needs localhost, not Docker service name
-DEFAULT_API = os.getenv("DASHBOARD_API_URL", "http://localhost:8000")
+# Default API URL - use Docker service name for server-side requests made by Streamlit
+DEFAULT_API = os.getenv("DASHBOARD_API_URL", "http://api:8000")
 TIMEOUT = 180  # Increased for large scoring operations
 
 
