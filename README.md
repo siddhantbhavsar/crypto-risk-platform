@@ -1,142 +1,341 @@
-# Crypto AML Risk Platform
+# Crypto AML Risk Platform 🛡️
 
-Production-style crypto AML risk pipeline with streaming ingestion, graph analytics, scoring, explainability, and a Streamlit analyst dashboard. The system is designed to mirror real-world AML monitoring flows end-to-end, from transaction ingestion to risk scoring and analyst review.
+Production-grade crypto AML risk detection system with streaming ingestion, graph analytics, multi-hop risk scoring, explainability, and interactive visualization. Built for analysts to detect and investigate suspicious cryptocurrency transactions.
 
-## What this project does
+---
 
-At a high level, the platform:
+## 🎯 What This Platform Does
 
-- Ingests wallet-to-wallet transactions via Kafka or CSV.
-- Persists transactions and run metadata in Postgres.
-- Builds a directed transaction graph for analysis.
-- Runs multi-hop risk scoring with configurable weights.
-- Exposes explainability and observability endpoints.
-- Provides a Streamlit dashboard for analysts to explore results.
+Real-world AML monitoring pipeline from end-to-end:
 
-## Architecture
+- **Ingests** wallet-to-wallet transactions (live Ethereum data via Etherscan or streaming via Kafka)
+- **Stores** transactions and metadata in PostgreSQL
+- **Builds** directed transaction graph for network analysis
+- **Scores** wallets using multi-hop risk algorithm with configurable weights
+- **Explains** why wallets are risky (hop-by-hop breakdown)
+- **Visualizes** transaction networks with interactive graph explorer
+
+---
+
+## 🏗️ Architecture
 
 ```mermaid
 flowchart LR
   subgraph Ingestion
-    SIM[Simulator]
+    ETH[Etherscan API]
     PROD[Kafka Producer]
     K[(Kafka Topic)]
     CONS[Kafka Consumer]
   end
 
   subgraph Storage
-    DB[(Postgres)]
+    DB[(PostgreSQL)]
   end
 
-  subgraph API_and_Scoring
-    API[FastAPI API]
-    GRAPH[Graph Reload]
-    SCORE[Risk Scoring Engine]
-    RUNS[(scoring_runs)]
-    SCORES[(risk_scores)]
+  subgraph API
+    API[FastAPI]
+    GRAPH[Graph Engine]
+    SCORE[Risk Scoring]
   end
 
   subgraph Dashboard
-    STREAM[Streamlit Dashboard]
-    GRAPH_VIZ[Wallet Graph]
-    EXPLAIN[Explainability]
+    DASH[Streamlit UI]
+    VIZ[Graph Visualizer]
   end
 
-  SIM --> PROD --> K --> CONS --> DB
+  ETH --> API
+  PROD --> K --> CONS --> DB
   DB --> API
   API --> GRAPH --> SCORE
-  SCORE --> RUNS
-  SCORE --> SCORES
-  API --> STREAM
-  STREAM --> GRAPH_VIZ
-  STREAM --> EXPLAIN
-  API --> STATUS[/ingestion/status/]
-  API --> EXPLAIN_API[/scores/explain/]
+  API --> DASH --> VIZ
 ```
 
-## Highlights
+### Components
 
-- Kafka ingestion with idempotent writes to Postgres.
-- Multi-hop graph risk scoring with persisted runs and audit trail.
-- Explainability endpoint for hop-by-hop attribution.
-- Streamlit dashboard with wallet graph exploration, presets, and export.
-- Docker-first setup with Alembic migrations.
+- **Etherscan Fetcher** - Pulls live Ethereum transactions
+- **Kafka Pipeline** - Streaming ingestion (producer → consumer)
+- **PostgreSQL** - Persistent storage for transactions and scores
+- **Risk Engine** - Multi-hop graph algorithm with degree normalization
+- **FastAPI** - REST API for scoring, explainability, and graph queries
+- **Streamlit Dashboard** - Analyst UI with leaderboard, explainability, and network graph
 
-## Repository structure
+---
 
-```
-crypto-risk-platform/
-  services/
-    api/
-    ingestion/
-    scoring/
-  scripts/
-    demo.py
-  alembic/
-  docker-compose.yml
-  Dockerfile
-  requirements.txt
-  pyproject.toml
-```
+## 🚀 Quick Start
 
-## Quickstart
+### Prerequisites
 
-Start the platform:
+- Docker & Docker Compose
+- (Optional) Etherscan API key for live data
 
-```
-docker compose up -d --build
+### Run Complete Demo
+
+```bash
+# Make demo script executable
+chmod +x run_demo.sh
+
+# Run full demo (includes data ingestion)
+./run_demo.sh
 ```
 
-Access services:
+**The demo will:**
+1. Fetch live Ethereum transactions (or generate sample data)
+2. Start all services (PostgreSQL, API, Dashboard)
+3. Build transaction graph
+4. Run risk scoring
+5. Show top risky wallets with explainability
+6. Display network visualization
 
-- API: http://localhost:8000
-- Dashboard: http://localhost:8501
-- Postgres: localhost:5432
+**Duration:** ~3 minutes
 
-Generate sample transactions and publish to Kafka:
+---
 
+## 📊 Access Services
+
+### In GitHub Codespaces
+
+The script automatically detects Codespaces and uses forwarded ports:
+- **Dashboard**: Click "Ports" tab → Open port 8501
+- **API Docs**: Click "Ports" tab → Open port 8000
+
+### Local Development
+
+- **Dashboard**: http://localhost:8501
+- **API**: http://localhost:8000
+- **API Docs (Swagger)**: http://localhost:8000/docs
+- **PostgreSQL**: localhost:5432
+
+---
+
+## 🎬 Demo Walkthrough
+
+### 1. Health Check
+```bash
+curl http://localhost:8000/health | jq
 ```
-docker compose exec api python services/ingestion/simulator.py
+
+### 2. Load Graph from Data
+```bash
+curl -X POST http://localhost:8000/reload-graph | jq
+```
+
+### 3. Run Risk Scoring
+```bash
+curl -X POST http://localhost:8000/run-score | jq
+```
+
+### 4. View Top Risk Wallets
+```bash
+curl 'http://localhost:8000/scores/top?limit=10' | jq
+```
+
+### 5. Explain a Wallet's Risk
+```bash
+# Get top wallet
+WALLET=$(curl -s 'http://localhost:8000/scores/top?limit=1' | jq -r '.[0].wallet')
+
+# Get explainability
+curl "http://localhost:8000/scores/explain/$WALLET?max_hops=2" | jq
+```
+
+### 6. Get Transaction Network
+```bash
+curl "http://localhost:8000/graph/wallet/$WALLET?hops=2&node_limit=50" | jq
+```
+
+---
+
+## 📚 How It Works
+
+### Multi-Hop Risk Scoring Algorithm
+
+The platform calculates wallet risk scores based on proximity to known illicit wallets:
+
+**Formula:**
+```
+risk_score = Σ(hop_weight[h] × illicit_count[h]) / sqrt(degree)
+```
+
+Where:
+- `hop_weight` = (1.0, 0.6, 0.3) for hops 0, 1, 2
+- `illicit_count[h]` = number of illicit wallets at exact hop distance h
+- `degree` = in_degree + out_degree (for normalization)
+
+**Key Features:**
+- **Multi-hop exposure**: Considers 0-hop (direct), 1-hop (neighbors), 2-hop (neighbors-of-neighbors)
+- **Weighted decay**: Closer relationships have higher impact
+- **Degree normalization**: Prevents bias toward high-connectivity wallets (exchanges, contracts)
+
+### Explainability
+
+For any wallet, the platform provides:
+
+1. **Hop Breakdown**: Exact count of illicit wallets at each hop distance
+2. **Top Contributors**: Specific illicit wallets contributing to the score
+3. **Contribution Values**: How much each illicit wallet increases the risk
+4. **Network Context**: In/out degree, tag (center/illicit/neighbor)
+
+---
+
+## 🎨 Dashboard Features
+
+### Overview Tab
+- Health status and readiness checks
+- Ingestion metrics (transaction count, graph stats)
+- Recent scoring run summary
+
+### Leaderboard Tab
+- Top N highest risk wallets (sortable table)
+- Risk score distribution chart
+- Wallet details (in/out degree, timestamps)
+
+### Explainability Tab
+- Wallet selector dropdown
+- Hop-by-hop breakdown table
+- Top contributing wallets list
+- Contribution chart visualization
+
+### Wallet Graph Tab
+- Interactive network visualization (PyVis)
+- Visual filters:
+  - Direction (incoming/outgoing/both)
+  - Hop distance limiter
+  - Node type tags (center/illicit/neighbor)
+  - Transaction count and amount thresholds (supports 4 decimal places)
+  - Top-K edges by amount
+- Color-coded nodes:
+  - 🟢 Green = Center (selected wallet)
+  - 🔴 Red = Illicit (flagged)
+  - 🔵 Blue = Neighbor (normal)
+---
+
+## 🚨 Known Limitations
+
+- **Illicit labels**: Currently simulated (5% random sample). Replace with real labeled data.
+- **Scalability**: In-memory graph limits to ~100K wallets. For larger graphs, use GraphDB (Neo4j).
+- **Rate limits**: Etherscan free tier is rate-limited (5 calls/sec).
+- **Real-time**: Current design is batch-oriented. For real-time, optimize scoring for incremental updates.
+
+---
+
+## 🤝 Contributing
+
+### Adding Features
+
+1. **New risk algorithm**: Edit `services/scoring/risk_engine.py`
+2. **New API endpoint**: Add to `services/api/main.py`
+3. **Dashboard tab**: Extend `dashboard/app.py`
+4. **Data source**: Implement in `services/blockchain/` or `services/ingestion/`
+
+### Code Style
+
+- Python: Follow PEP 8, use type hints
+- Format: `black` and `ruff`
+- Test: Write pytest tests in `tests/`
+
+---
+
+## 📚 Additional Documentation
+
+- **Project Walkthrough**: [docs/PROJECT_WALKTHROUGH.md](docs/PROJECT_WALKTHROUGH.md)
+- **Blockchain Guide**: [docs/BLOCKCHAIN_GUIDE.md](docs/BLOCKCHAIN_GUIDE.md)
+- **Screenshots**: [assets/screenshots/](assets/screenshots/)
+
+---
+
+## 📄 License
+
+MIT License - See [LICENSE](LICENSE) file
+
+---
+
+## 🙏 Acknowledgments
+
+- Inspired by real-world AML compliance requirements
+- Built with: FastAPI, Streamlit, NetworkX, PostgreSQL, Kafka
+- Ethereum data via Etherscan API
+
+---
+
+## 🎯 Next Steps
+
+After running the demo:
+
+1. **Explore Dashboard** - Interact with all 4 tabs
+2. **Try API** - Use Swagger docs at /docs
+3. **Fetch Real Data** - Add your Etherscan API key
+4. **Customize Scoring** - Adjust hop weights
+5. **Add Labels** - Replace simulated illicit set with real data
+
+**Happy analyzing! 🚀**
+### Live Ethereum Data (Recommended)
+
+The demo script (`./run_demo.sh`) automatically fetches live data using your Etherscan API key.
+
+**Manual fetch:**
+```bash
+# Set API key in .env
+ETHERSCAN_API_KEY=your_key_here
+
+# Fetch data for specific wallets
+docker compose exec api python -m services.blockchain.fetch_ethereum \
+    --wallets 0xd8da6bf26964af9d7eed9e03e53415d37aa96045 \
+    --api-key $ETHERSCAN_API_KEY \
+    --output data/transactions.csv
+```
+
+**Well-known wallets included in demo:**
+- Vitalik Buterin's wallet
+- Binance exchange wallets
+- WETH contract
+- Major DeFi protocol wallets
+
+### Sample Generated Data
+
+```bash
+docker compose exec api python -c "
+from services.ingestion.simulator import simulate_transactions, write_transactions_csv
+df = simulate_transactions(n_wallets=200, n_txs=2000)
+write_transactions_csv(df)
+"
+```
+
+### Kafka Streaming Ingestion
+
+```bash
+# Start Kafka services
+docker compose up -d kafka zookeeper
+
+# Publish transactions from CSV
 docker compose exec api python -m services.ingestion.kafka_producer
+
+# Consumer will automatically ingest into DB
+docker compose logs -f consumer
 ```
 
-Run the demo script:
+---
 
-```
-python scripts/demo.py
-```
+## 🎓 Technical Details
 
-## Dashboard
+### Graph Construction
+- **Type**: Directed graph (DiGraph)
+- **Nodes**: Unique wallet addresses
+- **Edges**: Aggregated transactions (tx_count + total_amount)
+- **Storage**: In-memory NetworkX graph + PostgreSQL persistence
 
-The Streamlit UI focuses on analyst workflows:
+### Risk Engine
+- **Algorithm**: Multi-hop BFS with weighted aggregation
+- **Complexity**: O(V + E) for graph construction, O(V × hops) for scoring
+- **Normalization**: sqrt(in_degree + out_degree)
+- **Illicit seed**: Randomly selected 5% of wallets (configurable)
 
-- Risk leaderboard and explainability views.
-- Wallet graph visualization with filters, presets, and export.
-- Connected-only filtering to hide isolated nodes before graph load.
+### Database Schema
 
-## API
-
-Core endpoints:
-
-```
-GET  /health
-POST /reload-graph
-POST /run-score
-GET  /scores/top?limit=10
-GET  /scores/{wallet}
-GET  /scores/explain/{wallet}
-GET  /ingestion/status
-GET  /ready
-GET  /graph/wallet/{wallet}
-```
-
-Wallet graph query parameters:
-
-- `hops` (1-4, default 2)
-- `edge_limit` (50-3000, default 600)
-- `node_limit` (10-500, default 100)
-- `min_amount` (0.0+, default 0.0)
-- `only_connected` (bool, default false)
+**Tables:**
+- `transactions` - Raw transaction data
+- `scoring_runs` - Metadata for each scoring execution
+- `risk_scores` - Per-wallet scores and exposures
+- `ingestion_state` - Kafka consumer state
 
 ## Configuration
 

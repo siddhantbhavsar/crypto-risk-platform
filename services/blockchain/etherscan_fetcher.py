@@ -69,14 +69,9 @@ class EtherscanFetcher:
         }
 
         try:
-            print(f"   DEBUG: Calling Etherscan V2 API with address={address}")
-            print(f"   DEBUG: API key (first 10 chars): {self.api_key[:10]}...")
-            
             resp = requests.get(self.BASE_URL, params=params, timeout=10)
             resp.raise_for_status()
             data = resp.json()
-
-            print(f"   DEBUG: API response: {data.get('message')}")
             
             if data.get("status") == "0":
                 # No transactions or error
@@ -97,7 +92,6 @@ class EtherscanFetcher:
                 print(f"   ⚠️  Error result: {txs}")
                 return []
                 
-            print(f"   DEBUG: Found {len(txs) if isinstance(txs, list) else 0} transactions")
             return txs[:max_results] if isinstance(txs, list) else []
 
         except Exception as e:

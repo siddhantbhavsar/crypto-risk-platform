@@ -37,6 +37,12 @@ jobs:
         run: |
           PYTHONPATH=. python -m pytest -q
 
+      - name: Create CI .env file
+        run: |
+          cat > .env << 'EOF'
+          ETHERSCAN_API_KEY=${{ secrets.ETHERSCAN_API_KEY }}
+          EOF
+
       # --- Docker validation ---
       - name: Docker build (api)
         run: |

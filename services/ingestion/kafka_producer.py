@@ -30,8 +30,6 @@ def normalize_row(row: Dict[str, str]) -> Optional[Dict[str, Any]]:
       - receiver
       - amount
       - timestamp (optional/nullable)
-
-    Also includes src/dst mirrors for compatibility/debugging.
     """
     tx_id = row.get("tx_id") or str(uuid.uuid4())
 
@@ -53,9 +51,6 @@ def normalize_row(row: Dict[str, str]) -> Optional[Dict[str, Any]]:
         "receiver": receiver,
         "amount": amount,
         "timestamp": timestamp,
-        # Mirrors (handy for debugging + backward compatibility)
-        "src": sender,
-        "dst": receiver,
     }
     return msg
 

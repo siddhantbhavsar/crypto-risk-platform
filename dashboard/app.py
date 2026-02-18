@@ -25,8 +25,7 @@ st.session_state.setdefault("wallet_graph_params", None)
 st.session_state.setdefault("graph_presets", {})  # Store named filter presets
 
 DEFAULT_API = "http://api:8000"  # Docker Compose service name
-TIMEOUT = 30
-df = pd.DataFrame()  # always defined to avoid blank-page crashes
+TIMEOUT = 180  # Increased for large scoring operations
 
 
 
@@ -109,8 +108,6 @@ if reload_clicked:
         st.sidebar.error(err)
     else:
         st.sidebar.success("Graph reloaded")
-        # optional: remove JSON spam
-        # st.sidebar.json(res)
 
 if run_score_clicked:
     res, err = safe_call(_post, api_base, "/run-score")
@@ -118,7 +115,6 @@ if run_score_clicked:
         st.sidebar.error(err)
     else:
         st.sidebar.success("Scoring complete")
-        # st.sidebar.json(res)
 
 # ----------------------------
 # Shared fetch (used by multiple tabs)
@@ -176,17 +172,30 @@ with tab_overview:
             st.error(err)
         else:
             metrics = status.get("metrics") or {} if isinstance(status, dict) else {}
+            graph_stats = status.get("graph_stats") or {} if isinstance(status, dict) else {}
             tx_count = status.get("tx_count")
             seconds_since = metrics.get("seconds_since_last_processed")
             total_inserted = metrics.get("total_inserted")
-
-            a, b, c = st.columns(3)
-            a.metric("Tx Count", tx_count if tx_count is not None else "n/a")
-            b.metric("Inserted", total_inserted if total_inserted is not None else "n/a")
-            c.metric(
-                "Last Ingest (sec)",
-                f"{seconds_since:.0f}" if isinstance(seconds_since, (int, float)) else "n/a",
-            )
+            
+            # For CSV mode, show graph stats instead of Kafka consumer metrics
+            if tx_count and tx_count > 0 and (total_inserted is None or total_inserted == 0):
+                # CSV mode - show graph statistics
+                nodes = graph_stats.get("nodes", "n/a")
+                edges = graph_stats.get("edges", "n/a")
+                
+                a, b, c = st.columns(3)
+                a.metric("Tx Count", tx_count if tx_count is not None else "n/a")
+                b.metric("Graph Nodes", nodes)
+                c.metric("Graph Edges", edges)
+            else:
+                # Kafka mode - show ingestion metrics
+                a, b, c = st.columns(3)
+                a.metric("Tx Count", tx_count if tx_count is not None else "n/a")
+                b.metric("Inserted", total_inserted if total_inserted is not None else "n/a")
+                c.metric(
+                    "Last Ingest (sec)",
+                    f"{seconds_since:.0f}" if isinstance(seconds_since, (int, float)) else "n/a",
+                )
 
             with st.expander("Raw response"):
                 st.json(status)
@@ -417,13 +426,23 @@ def apply_graph_filters(payload: dict, *, direction: str, max_hop_show: int, all
 
     # 2) edges by direction + thresholds + endpoint presence
     def edge_passes_dir(e):
+        """
+        Filter edges by direction relative to center wallet:
+        - 'both': All edges between selected nodes
+        - 'outgoing': Only edges flowing FROM center (direct connections only)
+        - 'incoming': Only edges flowing TO center (direct connections only)
+        
+        Note: For multi-hop visualization, use 'both' to see all edges.
+        """
         if not center:
             return True
+        
         if direction == "outgoing":
             return e["source"] == center
-        if direction == "incoming":
+        elif direction == "incoming":
             return e["target"] == center
-        return True
+        else:  # "both"
+            return True
 
     edges_kept = []
     for e in edges_in:
@@ -527,7 +546,7 @@ with tab_graph:
         with c3:
             max_nodes = st.slider("Max nodes", 10, 500, 100)
         with c4:
-            min_amount = st.number_input("Min amount", min_value=0.0, value=0.0, step=10.0)
+            min_amount = st.number_input("Min amount", min_value=0.0, value=0.0, step=0.0001, format="%.4f")
         
         c5 = st.columns(1)[0]
         with c5:
@@ -565,34 +584,32 @@ with tab_graph:
     # ---- View filters (single place for filtering)
     filtered_payload = None
     if payload:
-        st.markdown("### Graph Filters (View)")
+        st.markdown("### Graph Filters (Visual)")
 
-        f1, f2, f3, f4 = st.columns([1.2, 1.2, 1.6, 1.4])
+        f1, f2, f3 = st.columns([1.2, 2.0, 1.4])
         with f1:
             direction = st.selectbox("Direction", ["both", "outgoing", "incoming"], index=0)
         with f2:
-            # default to API hops so it doesn’t feel duplicated
-            max_hop_show = st.slider("Show hops ≤", 0, 4, int(st.session_state["wallet_graph_params"]["hops"]))
-        with f3:
             allowed_tags = st.multiselect(
-                "Include tags",
+                "Include node types",
                 ["center", "illicit", "neighbor"],
                 default=["center", "illicit", "neighbor"],
             )
-        with f4:
+        with f3:
             # Auto-highlight selected node from wallet info panel
             default_highlight = st.session_state.get("highlighted_node", "").strip()
             highlight_wallet = st.text_input("Highlight wallet (optional)", value=default_highlight).strip()
             if default_highlight and not highlight_wallet:
                 highlight_wallet = default_highlight
 
-        g1, g2, g3 = st.columns(3)
+        g1, g2 = st.columns(2)
         with g1:
             min_tx_count = st.number_input("Min tx_count", min_value=0, value=0, step=1)
         with g2:
-            min_total_amount = st.number_input("Min total_amount", min_value=0.0, value=0.0, step=10.0)
-        with g3:
             top_k_edges = st.number_input("Top-K edges by amount (0=off)", min_value=0, value=0, step=50)
+
+        # Use hops from API fetch parameters (no duplicate slider)
+        max_hop_show = int(st.session_state["wallet_graph_params"]["hops"])
 
         filtered_payload = apply_graph_filters(
             payload,
@@ -600,10 +617,10 @@ with tab_graph:
             max_hop_show=max_hop_show,
             allowed_tags=allowed_tags,
             min_tx_count=min_tx_count,
-            min_total_amount=min_total_amount,
+            min_total_amount=0.0,  # Already filtered at API level
             top_k_edges=top_k_edges,
             highlight_wallet=highlight_wallet,
-            show_only_connected=False,  # Now handled at API level during fetch
+            show_only_connected=False,  # Already handled at API level during fetch
         )
 
     # ---- Export Controls
@@ -660,6 +677,16 @@ with tab_graph:
             display_payload = filtered_payload if filtered_payload else payload
             nodes = display_payload.get("nodes", [])
             edges = display_payload.get("edges", [])
+            
+            # Diagnostic: Show hop distribution
+            raw_nodes = payload.get("nodes", [])
+            hop_dist = {}
+            for n in raw_nodes:
+                h = n.get("hop", 0)
+                hop_dist[h] = hop_dist.get(h, 0) + 1
+            
+            st.caption(f"**Loaded hops:** {', '.join(f'hop {h}: {c} nodes' for h, c in sorted(hop_dist.items()))}")
+            st.caption(f"**Displaying:** {len(nodes)} nodes, {len(edges)} edges")
 
             node_by_id = {str(n.get("id")): n for n in nodes if isinstance(n, dict) and n.get("id") is not None}
             
@@ -683,7 +710,14 @@ with tab_graph:
             # Show node tag with visual indicator
             tag = center_node.get("tag", "neighbor")
             tag_colors = {"center": "🟢 Center", "illicit": "🔴 Illicit", "neighbor": "🔵 Neighbor"}
-            st.info(f"**Node Type:** {tag_colors.get(tag, tag)}")
+            
+            # Use color-coded boxes for different node types
+            if tag == "center":
+                st.success(f"**Node Type:** {tag_colors.get(tag, tag)}")
+            elif tag == "illicit":
+                st.error(f"**Node Type:** {tag_colors.get(tag, tag)}")
+            else:
+                st.info(f"**Node Type:** {tag_colors.get(tag, tag)}")
 
             in_edges = [e for e in edges if str(e.get("target")) == center]
             out_edges = [e for e in edges if str(e.get("source")) == center]

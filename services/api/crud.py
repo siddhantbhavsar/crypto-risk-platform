@@ -142,13 +142,6 @@ def count_scores_for_run(db: Session, run_id: int) -> int:
     return int(db.query(func.count(RiskScore.id)).filter(RiskScore.run_id == run_id).scalar() or 0)
 
 
-def count_recent_transactions(db: Session, minutes: int = 5) -> int:
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
-    return int(
-        db.query(func.count(Transaction.id)).filter(Transaction.timestamp >= cutoff).scalar() or 0
-    )
-
-
 def count_ingested_since(db: Session, minutes: int = 5) -> int:
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
     return int(

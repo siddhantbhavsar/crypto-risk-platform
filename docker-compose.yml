@@ -60,6 +60,7 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    restart: unless-stopped
 
   kafka:
     image: confluentinc/cp-kafka:7.6.1
@@ -85,6 +86,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+    restart: unless-stopped
 
   consumer:
     build: .

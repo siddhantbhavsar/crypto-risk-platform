@@ -54,14 +54,13 @@ async def startup():
     global GRAPH, ILLICIT, GRAPH_READY, GRAPH_ERROR
 
     print("=" * 80, flush=True)
-    print("🚀 STARTUP EVENT CALLED!", flush=True)
+    print("🚀 Starting up API", flush=True)
     print("=" * 80, flush=True)
 
-    # --- existing logic below ---
     GRAPH_READY = False
     GRAPH_ERROR = None
 
-    print(f"🔧 Starting up API with TX_SOURCE={TX_SOURCE}, TX_PATH={TX_PATH}", flush=True)
+    print(f"🔧 TX_SOURCE={TX_SOURCE}, TX_PATH={TX_PATH}", flush=True)
 
     try:
         if TX_SOURCE == "db":
@@ -169,22 +168,7 @@ def reload_graph(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=GRAPH_ERROR)
 
 
-# --- OLD: in-memory scoring (still useful) ---
-@app.get("/score/{wallet}")
-def score_in_memory(wallet: str):
-    if not GRAPH_READY:
-        raise HTTPException(status_code=503, detail=f"Graph not ready: {GRAPH_ERROR}")
-
-    if GRAPH is None or ILLICIT is None:
-        raise HTTPException(status_code=503, detail="Service not ready")
-
-    result = risk_score_wallet(GRAPH, wallet, ILLICIT, cfg)
-    if result.get("reason") == "wallet_not_in_graph":
-        raise HTTPException(status_code=404, detail=f"Wallet {wallet} not found")
-    return result
-
-
-# --- NEW: persist a scoring run + all wallet scores ---
+# --- Persist a scoring run + all wallet scores ---
 @app.post("/run-score")
 def run_score(db: Session = Depends(get_db)):
     if not GRAPH_READY:
@@ -445,22 +429,17 @@ def calculate_node_importance(node, graph, score_map, illicit_set, hop_num=999, 
     Calculate importance score for prioritizing nodes when limiting graph size.
     Higher score = more important to display.
     
-    Considers:
-    - Risk score (primary metric)
-    - Degree centrality (hub nodes)
-    - Illicit status (red flags)
-    - Proximity to center (closer = more connected)
-    - Direct connectivity to center wallet (guarantees edges in visualization)
+    Prioritizes:
+    1. Degree centrality (hub nodes that show network structure)
+    2. Risk score (interesting from AML perspective)
+    3. Connectivity to center (ensures visible edges)
+    4. Minimal illicit bias (to show diverse node types)
     """
     risk_score = float(score_map.get(node, 0.0))
     degree = graph.in_degree(node) + graph.out_degree(node)
     is_illicit = 1.0 if node in illicit_set else 0.0
     
-    # Proximity bonus: closer to center = more likely to have edges
-    hop_bonus = max(0.0, 2.0 - (hop_num / 2.0))  # Hop 0-4 mapped to 2.0-0.0 (stronger bonus)
-    
-    # Direct connectivity bonus: if connected to center, boost score significantly
-    # This ensures connected nodes show edges in the graph
+    # Direct connectivity bonus: Strongly prefer nodes with edges to center
     connected_to_center = 0.0
     if center_wallet:
         if graph.has_edge(node, center_wallet):
@@ -468,13 +447,16 @@ def calculate_node_importance(node, graph, score_map, illicit_set, hop_num=999, 
         if graph.has_edge(center_wallet, node):
             connected_to_center += 2.0  # Has edge FROM center
     
-    # Weighted importance:
+    # Weighted importance (BALANCED for diversity):
+    # - Degree is PRIMARY (shows network structure)
+    # - Risk score SECONDARY (interesting nodes)
+    # - Illicit weight MINIMAL (just 0.2 to slightly prefer but not dominate)
+    # - Connectivity important for visualization
     importance = (
-        risk_score * 3.0 +              # Primary: risk score (weight 3)
-        min(1.0, degree / 50.0) * 2.0 +    # Secondary: degree centrality (weight 2)
-        is_illicit * 2.5 +              # Tertiary: illicit flag (weight 2.5)
-        hop_bonus +                     # Proximity to center (weight 1-2, stronger influence)
-        connected_to_center             # Direct connection to center (weight 0-4, strongest for connectivity)
+        min(5.0, degree / 10.0) * 4.0 +    # PRIMARY: Degree centrality (max 5.0, weight 4.0 = up to 20 points)
+        risk_score * 2.0 +                 # SECONDARY: Risk score (weight 2.0)
+        connected_to_center +              # Connectivity bonus (0-4)
+        is_illicit * 0.2                   # MINIMAL illicit bonus (reduced from 0.8 to 0.2)
     )
     
     return importance
@@ -512,63 +494,144 @@ def wallet_graph(
         raise HTTPException(status_code=404, detail=f"Wallet {wallet} not found in graph")
 
     layers = k_hop_layers_undirected(GRAPH, start=wallet, max_hops=int(hops))
+    print(f"[DEBUG] k_hop_layers returned {len(layers)} layers for wallet {wallet[:10]}..., max_hops={hops}", flush=True)
     if not layers:
         return {"center": wallet, "nodes": [], "edges": []}
 
-    # Step 1: Collect candidate nodes (3-5x node_limit for ranking)
-    # This gives us more context to select the MOST important nodes
-    candidate_limit = min(int(node_limit) * 4, 500)  # Cap at 500 for performance
-    candidate_set = set()
-    candidate_hop_map = {}
-    
-    for h, layer in enumerate(layers):
-        for n in layer:
-            if len(candidate_set) < candidate_limit:
-                candidate_set.add(n)
-                candidate_hop_map[n] = h
-            else:
-                break
-        if len(candidate_set) >= candidate_limit:
-            break
-
-    # fetch latest scores for candidate nodes (enrichment for prioritization)
+    # Fetch latest scores for enrichment (before node selection)
     latest_run = crud.get_latest_run(db)
     score_map = {}
     if latest_run:
+        # Get all wallets to pre-load scores
+        all_wallets = set()
+        for layer in layers:
+            all_wallets |= layer
+        
         scores = (
             db.query(crud.RiskScore.wallet, crud.RiskScore.risk_score)
             .filter(crud.RiskScore.run_id == latest_run.id)
-            .filter(crud.RiskScore.wallet.in_(candidate_set))
+            .filter(crud.RiskScore.wallet.in_(all_wallets))
             .all()
         )
         score_map = {w: float(s) for w, s in scores}
 
-    # Step 2: Rank candidates by importance, select top N
-    # CRITICAL: Always include the center wallet to ensure connectivity
-    if candidate_set:
-        remaining = candidate_set - {wallet}  # Remove center for ranking
-        ranked_by_importance = sorted(
-            remaining,
-            key=lambda n: calculate_node_importance(
-                n, GRAPH, score_map, ILLICIT, 
-                hop_num=candidate_hop_map.get(n, 999),
-                center_wallet=wallet
-            ),
-            reverse=True
-        )
+    # Step 1: IMPROVED node selection with hop-stratified sampling
+    # This ensures we get diversity across hops instead of just top-scoring nodes from all hops
+    node_set = {wallet}  # Always include center
+    hop_map = {wallet: 0}  # Center is at hop 0
+    
+    # Debug: Log layer sizes
+    print(f"[DEBUG] Wallet: {wallet}, Hops requested: {hops}", flush=True)
+    print(f"[DEBUG] Layer sizes: {[len(layer) for layer in layers]}", flush=True)
+    
+    # Calculate how many nodes to allocate per hop
+    # Strategy: Ensure balanced representation across all hops
+    remaining_budget = int(node_limit) - 1  # Minus 1 for center wallet
+    
+    if remaining_budget > 0 and len(layers) > 1:
+        # Count nodes per hop (excluding center at hop 0)
+        hop_sizes = [len(layer) for layer in layers[1:]]  # Exclude hop 0 (center)
+        total_available = sum(hop_sizes)
         
-        # Select top (node_limit - 1) important nodes, then add center back
-        num_to_select = max(0, int(node_limit) - 1)
-        selected_nodes = ranked_by_importance[:num_to_select]
+        print(f"[DEBUG] Hop sizes (excluding center): {hop_sizes}, Total: {total_available}", flush=True)
         
-        node_set = {wallet} | set(selected_nodes)  # Always include center
-        hop_map = {wallet: 0}  # Center is at hop 0
-        for n in selected_nodes:
-            hop_map[n] = candidate_hop_map.get(n, 999)
-    else:
-        # Fallback: just the center
-        node_set = {wallet}
-        hop_map = {wallet: 0}
+        if total_available > 0:
+            # SIMPLIFIED allocation: Split budget equally across hops, then adjust by availability
+            num_hops_with_nodes = len([s for s in hop_sizes if s > 0])
+            
+            # Start with equal allocation
+            equal_share = remaining_budget // num_hops_with_nodes
+            hop_allocations = []
+            remaining_to_allocate = remaining_budget
+            
+            # First pass: allocate equal shares or cap at hop size
+            for h_idx, size in enumerate(hop_sizes):
+                if size == 0:
+                    hop_allocations.append(0)
+                else:
+                    # Allocate equal share, but don't exceed hop size or remaining budget
+                    alloc = min(equal_share, size, remaining_to_allocate)
+                    hop_allocations.append(alloc)
+                    remaining_to_allocate -= alloc
+            
+            # Second pass: distribute any remaining budget to hops that have capacity
+            # This handles cases where small hops couldn't use their full share
+            if remaining_to_allocate > 0:
+                for h_idx, size in enumerate(hop_sizes):
+                    if size == 0 or hop_allocations[h_idx] >= size:
+                        continue
+                    
+                    # How much more can this hop accept?
+                    can_add = min(size - hop_allocations[h_idx], remaining_to_allocate)
+                    hop_allocations[h_idx] += can_add
+                    remaining_to_allocate -= can_add
+                    
+                    if remaining_to_allocate == 0:
+                        break
+            
+            print(f"[DEBUG] Hop allocations: {hop_allocations}", flush=True)
+            
+            # Now select top nodes from each hop based on allocation
+            for h_idx, allocation in enumerate(hop_allocations):
+                if allocation == 0:
+                    print(f"[DEBUG] Hop {h_idx + 1}: skipping (allocation=0)", flush=True)
+                    continue
+                
+                hop_num = h_idx + 1  # Actual hop number (1, 2, 3, ...)
+                
+                # CRITICAL BUG CHECK: Ensure hop_num is within layers bounds
+                if hop_num >= len(layers):
+                    print(f"[DEBUG] ERROR: hop_num {hop_num} >= len(layers) {len(layers)}", flush=True)
+                    continue
+                    
+                layer = layers[hop_num]
+                print(f"[DEBUG] Processing hop {hop_num}: allocation={allocation}, layer_size={len(layer)}", flush=True)
+                
+                # Rank nodes in this hop by importance
+                nodes_in_hop = list(layer)
+                ranked_in_hop = sorted(
+                    nodes_in_hop,
+                    key=lambda n: calculate_node_importance(
+                        n, GRAPH, score_map, ILLICIT,
+                        hop_num=hop_num,
+                        center_wallet=wallet
+                    ),
+                    reverse=True
+                )
+                
+                # DIVERSIFIED SELECTION: Take top 40%, middle 40%, bottom 20% to ensure variety
+                # This prevents only illicit nodes being selected
+                top_pct = int(allocation * 0.4)
+                mid_pct = int(allocation * 0.4)
+                bottom_pct = allocation - top_pct - mid_pct
+                
+                selected_from_hop = []
+                if len(ranked_in_hop) <= allocation:
+                    # Take all if we have fewer than allocation
+                    selected_from_hop = ranked_in_hop
+                else:
+                    # Stratified sampling for diversity
+                    selected_from_hop.extend(ranked_in_hop[:top_pct])  # Top nodes
+                    mid_start = len(ranked_in_hop) // 3
+                    selected_from_hop.extend(ranked_in_hop[mid_start:mid_start + mid_pct])  # Middle nodes
+                    if bottom_pct > 0:
+                        selected_from_hop.extend(ranked_in_hop[-bottom_pct:])  # Some lower-ranked nodes
+                
+                illicit_count = sum(1 for n in selected_from_hop if n in ILLICIT)
+                print(f"[DEBUG] Hop {hop_num}: selected {len(selected_from_hop)} of {len(layer)} nodes ({illicit_count} illicit, {len(selected_from_hop)-illicit_count} non-illicit)", flush=True)
+                
+                for n in selected_from_hop:
+                    node_set.add(n)
+                    hop_map[n] = hop_num
+        else:
+            # No nodes available beyond center
+            print("[DEBUG] No nodes available beyond center (total_available=0)", flush=True)
+    
+    print(f"[DEBUG] Final node_set size: {len(node_set)}", flush=True)
+    hop_distribution = {}
+    for h in hop_map.values():
+        hop_distribution[h] = hop_distribution.get(h, 0) + 1
+    print(f"[DEBUG] Hop distribution: {sorted(hop_distribution.items())}", flush=True)
 
     # Step 3: Build nodes payload with importance-ranked nodes
     nodes_out = []

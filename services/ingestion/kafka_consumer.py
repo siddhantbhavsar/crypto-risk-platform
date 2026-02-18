@@ -4,6 +4,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from kafka import KafkaConsumer
+from kafka.errors import NoBrokersAvailable
 
 from services.api import crud
 from services.api.db import SessionLocal
@@ -116,15 +117,30 @@ def main() -> None:
     batch_size = int(get_env("CONSUMER_BATCH_SIZE", "500"))
     poll_ms = int(get_env("CONSUMER_POLL_MS", "1000"))
     flush_seconds = float(get_env("CONSUMER_FLUSH_SECONDS", "2.0"))
+    connect_retry_seconds = float(get_env("CONSUMER_CONNECT_RETRY_SECONDS", "5"))
+    connect_max_attempts = int(get_env("CONSUMER_CONNECT_MAX_ATTEMPTS", "0"))
 
-    consumer = KafkaConsumer(
-        topic,
-        bootstrap_servers=bootstrap,
-        group_id=group_id,
-        enable_auto_commit=False,  # commit only after DB commit
-        auto_offset_reset="earliest",
-        value_deserializer=lambda v: json.loads(v.decode("utf-8")),
-    )
+    attempt = 0
+    consumer = None
+    while True:
+        attempt += 1
+        try:
+            consumer = KafkaConsumer(
+                topic,
+                bootstrap_servers=bootstrap,
+                group_id=group_id,
+                enable_auto_commit=False,  # commit only after DB commit
+                auto_offset_reset="earliest",
+                value_deserializer=lambda v: json.loads(v.decode("utf-8")),
+            )
+            break
+        except NoBrokersAvailable:
+            if connect_max_attempts > 0 and attempt >= connect_max_attempts:
+                raise
+            print(
+                f"⏳ Kafka not ready (attempt {attempt}); retrying in {connect_retry_seconds:.1f}s"
+            )
+            time.sleep(connect_retry_seconds)
 
     print(f"✅ Consumer connected: {bootstrap} topic='{topic}' group='{group_id}'")
 
