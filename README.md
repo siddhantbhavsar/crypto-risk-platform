@@ -207,6 +207,23 @@ For any wallet, the platform provides:
   - 🟢 Green = Center (selected wallet)
   - 🔴 Red = Illicit (flagged)
   - 🔵 Blue = Neighbor (normal)
+
+---
+
+## 📸 Screenshots
+
+### Top Wallets Leaderboard
+![Top Wallets Dashboard](assets/screenshots/top-wallets.png)
+Displays the highest risk wallets with scoring metrics and sortable columns.
+
+### Explainability Analysis
+![Explainability Breakdown](assets/screenshots/explainability.png)
+Hop-by-hop risk breakdown showing exactly which illicit wallets contribute to a wallet's score.
+
+### Ingestion Status
+![Ingestion Status](assets/screenshots/ingestion-status.png)
+Real-time ingestion metrics and graph statistics during data processing.
+
 ---
 
 ## 🚨 Known Limitations
