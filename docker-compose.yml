@@ -17,7 +17,7 @@ services:
       DATABASE_URL: postgresql+psycopg2://risk:risk@db:5432/riskdb
       KAFKA_TOPIC_TRANSACTIONS: transactions
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      TX_SOURCE: csv
+      TX_SOURCE: ${TX_SOURCE:-csv}
       ILLICIT_SEED: "123"
       PYTHONPATH: "/app"
 

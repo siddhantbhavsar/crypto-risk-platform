@@ -3,7 +3,8 @@
 # ============================================================================
 # CRYPTO AML RISK PLATFORM - COMPLETE DEMO
 # ============================================================================
-# Full demonstration including data ingestion, scoring, and visualization
+# Full demonstration including Kafka streaming ingestion, scoring, and visualization
+# Pipeline: Generate Data → Kafka → Consumer → PostgreSQL → Graph → Scoring
 # Works in both local and GitHub Codespaces environments
 # ============================================================================
 
@@ -31,7 +32,7 @@ echo -e "${BLUE}"
 cat << 'EOF'
 ╔═══════════════════════════════════════════════════════════╗
 ║     CRYPTO AML RISK PLATFORM - COMPLETE DEMO             ║
-║     Full Pipeline: Ingest → Score → Analyze              ║
+║     Full Pipeline: Kafka → DB → Graph → Score            ║
 ╚═══════════════════════════════════════════════════════════╝
 EOF
 echo -e "${NC}"
@@ -63,53 +64,37 @@ docker compose down -v 2>/dev/null || true
 echo ""
 
 # ============================================================================
-# STEP 2: DATA INGESTION (LIVE ETHEREUM DATA)
+# STEP 2: START INFRASTRUCTURE (KAFKA, ZOOKEEPER, DATABASE)
 # ============================================================================
-section "STEP 2: Data Ingestion - Fetching Live Ethereum Transactions"
+section "STEP 2: Starting Infrastructure Services"
 
-# Load API key from .env
+echo "🚀 Starting database, Kafka, and ZooKeeper..."
+docker compose up -d db kafka zookeeper
+echo ""
+echo "⏳ Waiting for Kafka/ZooKeeper to initialize (30 seconds)..."
+sleep 30
+
+echo "📊 Infrastructure Status:"
+docker compose ps db kafka zookeeper
+echo ""
+
+# ============================================================================
+# STEP 3: GENERATE SAMPLE DATA
+# ============================================================================
+section "STEP 3: Generating Sample Transaction Data"
+
+# Load API key from .env (for future use with live data)
 if [ -f .env ]; then
     export $(grep -v '^#' .env | xargs)
 fi
 
-API_KEY="${ETHERSCAN_API_KEY:-YourApiKeyToken}"
-
-# Well-known Ethereum wallets
-WALLETS=(
-    "0xd8da6bf26964af9d7eed9e03e53415d37aa96045"  # Vitalik Buterin
-    "0x28c6c06298d514db089934071355e5743bf21d60"  # Binance Hot Wallet
-    "0x21a31ee1afc51d94c2efccaa2092ad1028285549"  # Binance Cold Wallet
-    "0x47ac0fb4f2d84898e4d9e7b4dab3c24507a6d503"  # Binance Wallet
-    "0xbe0eb53f46cd790cd13851d5eff43d12404d33e8"  # Binance Wallet
-    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"  # WETH Contract
-)
-
-echo -e "📊 Fetching transactions from ${#WALLETS[@]} Ethereum wallets..."
-echo -e "🔑 Using API key: ${API_KEY:0:10}..."
-echo ""
-
-echo "🚀 Starting API container for data fetching..."
-docker compose up -d api
-sleep 10
-
-echo "📥 Fetching live data from Etherscan..."
-docker compose exec -T api python -m services.blockchain.fetch_ethereum \
-    --wallets "${WALLETS[@]}" \
-    --api-key "$API_KEY" \
-    --output data/transactions.csv \
-    --start-block 0 \
-    --end-block 99999999 || echo "⚠️  Etherscan fetch completed with warnings (may have rate limits)"
-
-# Check if data was fetched
-if [ ! -f data/transactions.csv ]; then
-    echo -e "${RED}❌ No data fetched. Generating sample data instead...${NC}"
-    docker compose exec -T api python -c "
+echo "🎲 Generating synthetic transaction data..."
+docker compose run --rm -T api python -c "
 from services.ingestion.simulator import simulate_transactions, write_transactions_csv
-df = simulate_transactions(n_wallets=200, n_txs=2000)
-write_transactions_csv(df)
-print('✅ Generated 2000 sample transactions')
+df = simulate_transactions(n_wallets=300, n_txs=2500, start_days_ago=60)
+write_transactions_csv(df, '/app/data/transactions.csv')
+print(f'✅ Generated {len(df)} sample transactions')
 "
-fi
 
 # Count transactions
 TX_COUNT=$(tail -n +2 data/transactions.csv 2>/dev/null | wc -l || echo "0")
@@ -118,26 +103,51 @@ echo -e "${GREEN}✅ Data ready: $TX_COUNT transactions${NC}"
 echo ""
 echo "📋 Sample data (first 5 rows):"
 head -6 data/transactions.csv | column -t -s, || true
-
-# ============================================================================
-# STEP 3: START ALL SERVICES
-# ============================================================================
-section "STEP 3: Starting All Services"
-
-echo "🚀 Launching database, API, and dashboard..."
-docker compose up -d
 echo ""
-echo "⏳ Waiting for services to initialize (20 seconds)..."
-sleep 20
+
+# ============================================================================
+# STEP 4: KAFKA INGESTION PIPELINE
+# ============================================================================
+section "STEP 4: Streaming Data via Kafka Pipeline"
+
+echo "🚀 Starting consumer service..."
+docker compose up -d consumer
+sleep 5
+
+echo ""
+echo "📤 Publishing transactions to Kafka..."
+docker compose exec -T consumer python -m services.ingestion.kafka_producer
+
+echo ""
+echo "⏳ Waiting for consumer to process transactions (10 seconds)..."
+sleep 10
+
+echo ""
+echo "📊 Checking ingestion progress..."
+INGESTED=$(docker compose exec -T db psql -U postgres -d crypto_risk -t -c "SELECT COUNT(*) FROM transactions;" 2>/dev/null || echo "0")
+echo -e "${GREEN}✅ Ingested $INGESTED transactions into PostgreSQL${NC}"
+
+# ============================================================================
+# STEP 5: START API & DASHBOARD (WITH DATABASE MODE)
+# ============================================================================
+section "STEP 5: Starting API & Dashboard Services"
+
+echo "🚀 Launching API and dashboard (with TX_SOURCE=db)..."
+# Export environment variable for API to use database mode
+export TX_SOURCE=db
+docker compose up -d api dashboard
+echo ""
+echo "⏳ Waiting for services to initialize (15 seconds)..."
+sleep 15
 
 echo ""
 echo "📊 Service Status:"
 docker compose ps
 
 # ============================================================================
-# STEP 4: HEALTH CHECKS
+# STEP 6: HEALTH CHECKS
 # ============================================================================
-section "STEP 4: Health & Readiness Checks"
+section "STEP 6: Health & Readiness Checks"
 
 echo "🏥 Checking API health..."
 curl -s $API_HOST/health | jq '.' || echo "⚠️  API not responding yet"
@@ -150,11 +160,11 @@ curl -s $API_HOST/ready | jq '.' || echo "⚠️  System not ready yet (normal, 
 echo ""
 
 # ============================================================================
-# STEP 5: LOAD GRAPH
+# STEP 7: LOAD GRAPH FROM DATABASE
 # ============================================================================
-section "STEP 5: Building Transaction Graph"
+section "STEP 7: Building Transaction Graph from Database"
 
-echo "🔄 Loading graph from transaction data..."
+echo "🔄 Loading graph from PostgreSQL database..."
 RELOAD_RESULT=$(curl -s -X POST $API_HOST/reload-graph)
 echo "$RELOAD_RESULT" | jq '.'
 
@@ -162,12 +172,12 @@ NODES=$(echo "$RELOAD_RESULT" | jq -r '.nodes // "N/A"')
 EDGES=$(echo "$RELOAD_RESULT" | jq -r '.edges // "N/A"')
 
 echo ""
-echo -e "${GREEN}✅ Graph built: $NODES nodes, $EDGES edges${NC}"
+echo -e "${GREEN}✅ Graph built from database: $NODES nodes, $EDGES edges${NC}"
 
 # ============================================================================
-# STEP 6: RUN RISK SCORING
+# STEP 8: RUN RISK SCORING
 # ============================================================================
-section "STEP 6: Running Risk Scoring Algorithm"
+section "STEP 8: Running Risk Scoring Algorithm"
 
 echo "🎯 Calculating risk scores for all wallets..."
 echo "   (Multi-hop algorithm with weights: 1.0, 0.6, 0.3)"
@@ -181,9 +191,9 @@ echo ""
 echo -e "${GREEN}✅ Scored $WALLETS_SCORED wallets${NC}"
 
 # ============================================================================
-# STEP 7: VIEW RESULTS
+# STEP 9: VIEW RESULTS
 # ============================================================================
-section "STEP 7: Top 10 Highest Risk Wallets"
+section "STEP 9: Top 10 Highest Risk Wallets"
 
 echo "🏆 Risk Leaderboard:"
 echo ""
@@ -202,9 +212,9 @@ echo "$TOP_SCORES" | jq -r '
 ' | column -t
 
 # ============================================================================
-# STEP 8: EXPLAINABILITY
+# STEP 10: EXPLAINABILITY
 # ============================================================================
-section "STEP 8: Explainability - Why is the top wallet risky?"
+section "STEP 10: Explainability - Why is the top wallet risky?"
 
 WALLET=$(echo "$TOP_SCORES" | jq -r '.[0].wallet')
 echo "🔍 Analyzing wallet: $WALLET"
@@ -226,9 +236,9 @@ echo "$EXPLAIN" | jq -r '.explainability.top_contributors[0:5][] |
 ' | column -t
 
 # ============================================================================
-# STEP 9: GRAPH VISUALIZATION
+# STEP 11: GRAPH VISUALIZATION
 # ============================================================================
-section "STEP 9: Transaction Network Graph"
+section "STEP 11: Transaction Network Graph"
 
 echo "🕸️  Fetching wallet network for: $WALLET"
 echo ""
@@ -251,18 +261,23 @@ echo "$GRAPH" | jq -r '.edges | sort_by(-.total_amount) | .[0:5][] |
 ' | column -t
 
 # ============================================================================
-# STEP 10: INGESTION STATUS
+# STEP 12: INGESTION STATUS
 # ============================================================================
-section "STEP 10: Ingestion & System Status"
+section "STEP 12: Ingestion & System Status"
 
-echo "📊 System Metrics:"
+echo "📊 Kafka Ingestion Metrics (now using database mode):"
 STATUS=$(curl -s $API_HOST/ingestion/status)
 echo "$STATUS" | jq '{
     status: .status,
     tx_count: .tx_count,
     graph_stats: .graph_stats,
+    tx_source: .tx_source,
+    metrics: .metrics,
     latest_run: .latest_scoring_run.wallets_scored
 }'
+
+echo ""
+echo -e "${GREEN}✅ Ingestion metrics now show real Kafka consumer activity!${NC}"
 
 # ============================================================================
 # COMPLETION
@@ -294,7 +309,7 @@ echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 echo -e "${YELLOW}💡 What to explore in the dashboard:${NC}"
-echo "  1. Overview Tab - Health metrics and graph statistics"
+echo "  1. Overview Tab - Health metrics, Kafka ingestion status, and graph statistics"
 echo "  2. Leaderboard Tab - Top risk wallets with scores"
 echo "  3. Explainability Tab - Understand why wallets are risky"
 echo "  4. Wallet Graph Tab - Interactive network visualization"
@@ -302,9 +317,11 @@ echo ""
 
 echo -e "${YELLOW}🔧 Useful commands:${NC}"
 echo "  • View logs: docker compose logs -f"
+echo "  • View consumer logs: docker compose logs -f consumer"
 echo "  • Restart: docker compose restart"
 echo "  • Stop: docker compose down"
 echo "  • Re-run scoring: curl -X POST $API_HOST/run-score | jq"
+echo "  • Check ingestion: curl $API_HOST/ingestion/status | jq"
 echo ""
 
 echo -e "${GREEN}Thank you for the demo! 🚀${NC}"
